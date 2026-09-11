@@ -1,0 +1,9 @@
+{
+  "name": "adhils-fitness-companion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": { "test": "node --test test/*.test.mjs", "start": "node src/cli.mjs serve" },
+  "dependencies": { "qrcode": "1.5.4" }
+}
