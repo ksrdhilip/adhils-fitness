@@ -123,7 +123,7 @@ import java.io.ByteArrayOutputStream
         if(working) LinearProgressIndicator(Modifier.fillMaxWidth())
     }
     TextButton(onClick={clear=true}) {Text("Clear ${state.profile.name}'s training data",color=MaterialTheme.colorScheme.error)}
-    SmallLabel("ADhils Fitness 0.1 · Personal preview")
+    SmallLabel("ADhils Fitness ${BuildConfig.VERSION_NAME} · Personal preview")
     if(pairing) AlertDialog(onDismissRequest={pairing=false;invitation=""},title={Text("Pair with your PC")},text={
         OutlinedTextField(value=invitation,onValueChange={invitation=it.take(4096)},label={Text("Invitation JSON")},maxLines=5)
     },confirmButton={TextButton(onClick={vm.pair(invitation);invitation="";pairing=false},enabled=invitation.isNotBlank()) {Text("Pair")}},dismissButton={TextButton(onClick={pairing=false;invitation=""}) {Text("Cancel")}})

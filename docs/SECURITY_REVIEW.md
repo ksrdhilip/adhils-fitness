@@ -56,3 +56,10 @@ This report describes the evidence and actions taken; it is not a Microsoft fals
 - Samsung ARM64 APK SHA-256: `3b4782c4478d71cb379806d23bfc5ca729aec2e477d59ba8380dca185b3aa47b`.
 - Android SDK `apksigner verify --verbose` verified the ARM64 APK signature (v2 signing, one signer). This is a development signing key, not a store release identity.
 - The earlier project-wide scan remained interrupted. A completed APK scan is not a certification of the whole computer.
+
+## Camera fix 0.1.1 package checks
+
+- ARM64 APK SHA-256: ad1d713c046485e66694a0a44189733db2f7a3c7aa157fb97b7b9e5cc9b5b3d0.
+- Version name 0.1.1, versionCode 2. The old 0.1.0 APK and this update have the same verified signer certificate SHA-256: 162dff7a0962f300788472ce8dff6f0136ca9dcb25415be6b069ea60a2d35aea. The old reference APK was checked against its published checksum before comparison.
+- Defender custom scan {B59EF304-8B92-453E-B9AD-A76DC073A28E} scanned the APK output folder on 2026-09-10 from 19:53:04 to 19:53:15. Completion was recorded, with no new detection event in the checked interval.
+- This fix adds no production dependencies and changes no antivirus settings. The APK scan does not certify the whole computer.

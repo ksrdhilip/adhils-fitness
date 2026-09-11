@@ -29,3 +29,11 @@ The native Android app and Windows companion are implemented. The initial valida
 - Optional OpenAI/Claude API keys need to be configured by the user if those providers are wanted.
 
 The earlier project-wide Defender scan was interrupted. Defender reported recorded detections inactive and no threat execution; this does not certify the whole computer malware-free.
+
+## Camera startup fix — version 0.1.1
+
+The user's front-camera screenshot confirmed "cannot use a recycled source in createBitmap". The app was displaying/mirroring the bitmap after MPImage.close recycled it. The fix creates an independent preview copy before releasing the inference image, including zero-rotation frames, and cleans up temporary buffers on failure.
+
+Four Android instrumentation tests passed on API 35, reproducing the original invalid preview and checking rear rotations, front mirroring and error cleanup. The 16 core tests passed; the final build and lint completed (0 errors, 18 warnings). The package version is 0.1.1 / code 2; its signing certificate matches 0.1.0 for normal in-place updates. See the 0.1.1 release notes and SECURITY_REVIEW.md for checksum and scan evidence.
+
+These tests validate Android bitmap ownership without requiring native ARM64 inference. Real Samsung movement accuracy and sustained performance still need user-device validation.

@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.Matrix
 import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -34,7 +33,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.adhils.fitness.core.*
-import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
@@ -63,13 +61,12 @@ private class CameraProcessor(context:Context,private val exercise:Exercise,priv
             val at=SystemClock.uptimeMillis()
             if(at-lastAt<60) return
             lastAt=at
-            val base=image.toBitmap()
-            val matrix=Matrix().apply {postRotate(image.imageInfo.rotationDegrees.toFloat())}
-            val rotated=Bitmap.createBitmap(base,0,0,base.width,base.height,matrix,true)
-            val input=BitmapImageBuilder(rotated).build()
-            val result=try {detector.detectForVideo(input,at)} finally {input.close()}
+            val analyzed=analyzeCameraFrame(image.toBitmap(),image.imageInfo.rotationDegrees,front) {
+                detector.detectForVideo(it,at)
+            }
+            val result=analyzed.result
             val joints=result.landmarks().firstOrNull()?.map {Joint(it.x(),it.y(),it.visibility().orElse(0f))} ?: emptyList()
-            val frame=PoseFrame(at,joints,rotated.width.toFloat()/rotated.height)
+            val frame=PoseFrame(at,joints,analyzed.preview.width.toFloat()/analyzed.preview.height)
             if(reset) {engine=PoseEngine(exercise.camera!!,cues);reset=false}
             val observation=when {
                 !started -> setup.update(frame)
@@ -77,9 +74,8 @@ private class CameraProcessor(context:Context,private val exercise:Exercise,priv
                 else -> engine.update(frame).also {last=it}
             }
             // Display the exact frame analyzed, so landmarks and image cannot drift.
-            val display=if(front) Bitmap.createBitmap(rotated,0,0,rotated.width,rotated.height,Matrix().apply {preScale(-1f,1f)},true) else rotated
             val shown=observation.copy(joints=if(front) observation.joints.map {it.copy(x=1f-it.x)} else observation.joints)
-            deliver(display,shown,SystemClock.uptimeMillis()-at)
+            deliver(analyzed.preview,shown,SystemClock.uptimeMillis()-at)
         } catch(e:Exception) {error(e.message ?: "Camera analysis failed")}
         catch(e:LinkageError) {nativeFailure=true;error("Camera tracking could not load on this device. Continue with manual logging.")}
         finally {image.close()}
