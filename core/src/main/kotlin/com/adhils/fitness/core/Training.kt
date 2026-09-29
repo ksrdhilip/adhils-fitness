@@ -12,7 +12,7 @@ object Training {
             }.take(2)
         val last = recent.firstOrNull() ?: return Progression(0.0, "Start with a comfortable weight and record your first set.")
         val (plan, sets) = last
-        val weight = sets.minOf { it.weightKg }
+        val weight = sets.filter { it.reps >= plan.minReps }.maxOfOrNull { it.weightKg } ?: sets.maxOf { it.weightKg }
         if (weight == 0.0) return Progression(0.0, "Build controlled repetitions before adding weight.")
         val increment = toKg(if (state.profile.unit == "lb") 2.5 else 1.0, state.profile.unit)
         if (sets.size >= plan.sets && sets.all { it.reps >= plan.maxReps && it.rpe != null && it.rpe <= 8 })
@@ -25,10 +25,14 @@ object Training {
         require(check.energy in 1..5 && check.soreness in 0..2 && check.minutes in 10..120)
         val p = state.profile
         val completed = state.sessions.count { it.finishedAt != null }
-        val variant = completed % 2
-        val ids = if (variant == 0) listOf("goblet-squat", "rdl", "press", "row", "plank")
-            else listOf("reverse-lunge", "bridge", "floor-press", "curl", "dead-bug")
-        val desired = when { check.minutes < 25 -> 3; check.minutes < 35 -> 4; else -> 5 }
+        val variant = completed % 4
+        val ids = when (variant) {
+            0 -> listOf("goblet-squat", "rdl", "press", "row", "plank", "lateral-raise")
+            1 -> listOf("reverse-lunge", "bridge", "floor-press", "curl", "dead-bug", "tricep-extension")
+            2 -> listOf("sumo-squat", "single-leg-rdl", "arnold-press", "hammer-curl", "side-plank", "calf-raise")
+            else -> listOf("bulgarian-split-squat", "hip-thrust", "bench-press", "chest-supported-row", "bird-dog", "front-raise")
+        }
+        val desired = when { check.minutes < 25 -> 3; check.minutes < 35 -> 4; check.minutes < 50 -> 5; else -> 6 }
         val chosen = ids.mapNotNull { id ->
             val e = Catalog.get(id)
             if (e.id !in p.excluded && (e.equipment == "Bodyweight" || e.equipment in p.equipment)) e
@@ -41,7 +45,8 @@ object Training {
         val repRange = when (p.goal) { "Get stronger" -> 5..8; "General fitness" -> 10..15; else -> 8..12 }
         val warmup = if ("march" !in p.excluded) listOf(PlannedExercise("march", 1, seconds = 120)) else emptyList()
         val coolDown = if ("cat-cow" !in p.excluded) listOf(PlannedExercise("cat-cow", 1, seconds = 60)) else emptyList()
-        return Session(title = "Full Body ${if (variant == 0) "A" else "B"}${if (easy) " · Light" else ""}",
+        val label = listOf("A", "B", "C", "D")[variant]
+        return Session(title = "Full Body $label${if (easy) " · Light" else ""}",
             plan = warmup + chosen.map {
                 PlannedExercise(it.id, sets = if (it.timed) 2 else sets, minReps = repRange.first, maxReps = repRange.last,
                     weightKg = nextLoad(it.id, state).weightKg * if (easy) 0.8 else 1.0)

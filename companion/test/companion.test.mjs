@@ -89,5 +89,6 @@ test('oversize input, public addresses and inherited workspace secrets are exclu
   assert.throws(()=>validateRequest(request({message:'x'.repeat(4001)})));
   assert.equal(privateAddress('8.8.8.8'),false);assert.equal(privateAddress('192.168.1.10'),true);
   assert.equal(privateAddress('::ffff:10.0.0.8'),true);assert.equal(privateAddress('192.168.1.500'),false);
-  const env=childEnvironment('C:/example');assert.equal(env.OPENAI_API_KEY,undefined);assert.equal(env.CODEX_APP_TOOLS_PIPE_PATH,undefined);
+  const env=childEnvironment('C:/example');assert.equal(env.OPENAI_API_KEY,undefined);assert.equal(env.ANTHROPIC_API_KEY,undefined);
+  assert.equal(env.CODEX_APP_TOOLS_PIPE_PATH,undefined);assert.ok(env.CODEX_HOME.endsWith('codex-home'));
 });

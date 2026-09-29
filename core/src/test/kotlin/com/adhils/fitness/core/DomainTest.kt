@@ -21,6 +21,11 @@ class DomainTest {
         assertEquals(10.0,Training.nextLoad("rdl",state(null)).weightKg)
         assertEquals(10.0,Training.nextLoad("rdl",state(10)).weightKg)
         assertTrue(Training.nextLoad("rdl",state(7)).weightKg>10)
+        val ramped=AppState(sessions=listOf(Session(plan=listOf(plan),finishedAt=124,results=listOf(
+            SetResult(exerciseId="rdl",setIndex=0,reps=10,weightKg=10.0,rpe=7),
+            SetResult(exerciseId="rdl",setIndex=1,reps=10,weightKg=12.5,rpe=8),
+            SetResult(exerciseId="rdl",setIndex=2,reps=10,weightKg=12.5,rpe=8)))))
+        assertEquals(12.5,Training.nextLoad("rdl",ramped).weightKg)
     }
     @Test fun staleAndDestructiveAiChangesAreRejected() {
         val session=Training.saveSet(Session(plan=listOf(PlannedExercise("rdl"))),
@@ -62,5 +67,18 @@ class DomainTest {
     }
     @Test fun aspectRatioCorrectsJointAngles() {
         assertEquals(90.0,PoseEngine.angle(Joint(0f,0f),Joint(.5f,0f),Joint(.5f,.5f),2f),.001)
+    }
+    @Test fun catalogAndAllFourWorkoutVariantsAreValid() {
+        assertEquals(Catalog.exercises.size,Catalog.byId.size)
+        assertTrue(Catalog.exercises.size>=60)
+        assertTrue(Catalog.exercises.all { it.equipment in setOf("Bodyweight","Dumbbells","Bands","Bench") })
+        assertTrue(Catalog.exercises.all { it.camera==null || it.camera in setOf("squat","rdl","press","pushup","plank") })
+        for(eq in listOf(setOf("Bodyweight"),setOf("Bodyweight","Dumbbells"),setOf("Bodyweight","Bands"),setOf("Bodyweight","Dumbbells","Bench"))) {
+            var state=AppState(profile=Profile(equipment=eq))
+            for(v in 0..3) {
+                val generated=Training.generate(state,CheckIn(minutes=55))
+                state=state.copy(sessions=state.sessions+generated.copy(finishedAt=1000L+v)).validated()
+            }
+        }
     }
 }

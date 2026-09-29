@@ -7,7 +7,9 @@ import { check, instructions, replySchema } from './contracts.mjs';
 // Only OS/runtime variables are inherited. No workspace tokens, API keys or app connector pipes.
 export function childEnvironment(root) {
   const env={};
-  for(const name of ['SystemRoot','WINDIR','COMSPEC','PATH','PATHEXT','USERPROFILE','LOCALAPPDATA','APPDATA','TEMP','TMP']) {
+  const allowed=['SystemRoot','WINDIR','COMSPEC','PATH','PATHEXT','USERPROFILE','LOCALAPPDATA','APPDATA','TEMP','TMP',
+    'HOME','USER','LOGNAME','SHELL','TMPDIR','LANG','SSL_CERT_FILE','SSL_CERT_DIR'];
+  for(const name of allowed) {
     const found=Object.keys(process.env).find(k=>k.toUpperCase()===name.toUpperCase());
     if(found) env[name]=process.env[found];
   }
@@ -15,7 +17,7 @@ export function childEnvironment(root) {
   return env;
 }
 export class CodexClient {
-  constructor(root,executable='codex.exe') {
+  constructor(root,executable=process.platform==='win32'?'codex.exe':'codex') {
     this.root=root;this.executable=executable;this.next=1;this.pending=new Map();this.listeners=new Set();
   }
   async start() {

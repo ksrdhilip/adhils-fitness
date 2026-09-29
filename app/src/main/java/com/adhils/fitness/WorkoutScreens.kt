@@ -31,6 +31,7 @@ object CameraDraft { var value by mutableStateOf<CameraSetDraft?>(null) }
     }
     key(s.id,e.id) {
         var setIndex by remember {mutableIntStateOf((0 until plan.sets).firstOrNull { i->s.results.none {it.exerciseId==e.id && it.setIndex==i} } ?: 0)}
+        LaunchedEffect(plan.sets) { if(setIndex>=plan.sets) setIndex=(plan.sets-1).coerceAtLeast(0) }
         var reps by remember {mutableStateOf("")}; var seconds by remember {mutableStateOf(plan.seconds.toString())}
         var weight by remember {mutableStateOf(decimal(fromKg(plan.weightKg,profile.unit)))}
         var effort by remember {mutableStateOf("")}; var notes by remember {mutableStateOf("")}

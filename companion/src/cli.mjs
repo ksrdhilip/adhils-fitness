@@ -1,4 +1,4 @@
-import { readFileSync,writeFileSync,existsSync,mkdirSync } from 'node:fs';
+import { readFileSync,writeFileSync,existsSync,mkdirSync,chmodSync } from 'node:fs';
 import { join,resolve,dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { networkInterfaces } from 'node:os';
@@ -15,19 +15,32 @@ const state=join(root,'.state');mkdirSync(state,{recursive:true});
 const args=process.argv.slice(2),command=args[0]??'help';
 const option=name=>{const i=args.indexOf(name);return i>=0?args[i+1]:undefined;};
 const escape=s=>s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
-const codex=new CodexClient(root,option('--codex')??'codex.exe');
+const codex=new CodexClient(root,option('--codex')??(process.platform==='win32'?'codex.exe':'codex'));
+
+function resolveOpenSSL(explicit) {
+  if(explicit) return explicit;
+  const candidates=process.platform==='win32'
+    ? ['C:\\Program Files\\Git\\usr\\bin\\openssl.exe']
+    : ['/opt/homebrew/bin/openssl','/usr/local/bin/openssl','/usr/bin/openssl'];
+  return candidates.find(p=>existsSync(p))??candidates[0];
+}
 
 async function main() {
   if(command==='setup') {
-    check(process.platform==='win32','This companion setup currently supports Windows only');
-    const openssl=option('--openssl')??'C:\\Program Files\\Git\\usr\\bin\\openssl.exe';
-    check(existsSync(openssl),'Use an installed official OpenSSL executable, supplied with Git for Windows, via --openssl.');
-    execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-File',join(root,'scripts','protect-state.ps1')],{windowsHide:true,stdio:'pipe'});
+    check(['win32','darwin','linux'].includes(process.platform),'This companion setup supports Windows, macOS, and Linux');
+    const openssl=resolveOpenSSL(option('--openssl'));
+    check(existsSync(openssl),'Use an installed official OpenSSL executable via --openssl.');
+    if(process.platform==='win32') {
+      execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-File',join(root,'scripts','protect-state.ps1')],{windowsHide:true,stdio:'pipe'});
+    } else {
+      chmodSync(state,0o700);
+    }
     // Files stay inside this project. No installers, remote scripts, firewall changes or startup services.
     const key=join(state,'server-key.pem'),cert=join(state,'server-cert.pem');
     if(!existsSync(key) && !existsSync(cert)) {
       execFileSync(openssl,['req','-x509','-newkey','rsa:2048','-sha256','-nodes','-keyout',key,'-out',cert,
         '-days','365','-subj','/CN=ADhils Fitness Companion'],{windowsHide:true,stdio:['ignore','ignore','pipe']});
+      if(process.platform!=='win32') {chmodSync(key,0o600);chmodSync(cert,0o644);}
     }
     check(existsSync(key) && existsSync(cert),'TLS identity is incomplete. Restore the matching key and certificate before continuing.');
     console.log('TLS identity is ready. Sign in with: node src/cli.mjs login');return;

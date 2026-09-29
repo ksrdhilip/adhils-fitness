@@ -10,7 +10,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 class FitnessViewModel(app:Application):AndroidViewModel(app) {
-    private val repository=FitnessRepository((app as FitnessApplication).database.snapshot())
+    private val repository=FitnessRepository((app as FitnessApplication).database.snapshot(),java.io.File(app.filesDir,"adhils-fitness-snapshot.json"))
     val companion=CompanionClient(app)
     private val mutex=Mutex()
     private var dataEpoch=0L
@@ -97,7 +97,9 @@ class FitnessViewModel(app:Application):AndroidViewModel(app) {
     fun status() { viewModelScope.launch {
         try {
             val result=companion.status()
-            connectionStatus.value="Connected · API usage "+(result["spentUsd"]?.toString() ?: "0")+" / 5 USD"
+            val spent=result["spentUsd"]?.toString() ?: "0"
+            val limit=result["limitUsd"]?.toString() ?: "5"
+            connectionStatus.value="Connected · API usage $spent / $limit USD"
         } catch(e:Exception) { connectionStatus.value=e.message ?: "PC unavailable" }
     } }
     suspend fun export(password:CharArray):ByteArray=withContext(Dispatchers.Default) { Backup.encrypt(store.value,password) }

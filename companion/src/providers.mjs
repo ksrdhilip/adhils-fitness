@@ -19,9 +19,12 @@ export function usageMicros(provider,usage) {
 export async function readCredential(root,name) {
   check(['openai','claude'].includes(name),'Unknown credential');
   check(existsSync(join(root,'.state',`${name}.credential`)),`Configure the ${name} API key on the PC first.`,503);
-  const {stdout}=await run('powershell.exe',['-NoProfile','-NonInteractive','-File',join(root,'scripts','credential.ps1'),'-Action','Read','-Name',name],
-    {windowsHide:true,timeout:10000,maxBuffer:8192});
-  check(stdout.trim().length>10,'Could not unlock API key. Run companion as the Windows user who saved it.',503);
+  const isWin=process.platform==='win32';
+  const cmd=isWin?'powershell.exe':'/bin/bash';
+  const args=isWin?['-NoProfile','-NonInteractive','-File',join(root,'scripts','credential.ps1'),'-Action','Read','-Name',name]:
+    [join(root,'scripts','credential.sh'),'Read',name];
+  const {stdout}=await run(cmd,args,{windowsHide:true,timeout:10000,maxBuffer:8192});
+  check(stdout.trim().length>10,'Could not unlock API key. Run companion as the user account that saved it.',503);
   return stdout.trim();
 }
 async function boundedJson(response) {

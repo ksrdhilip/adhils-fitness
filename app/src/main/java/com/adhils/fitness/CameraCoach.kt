@@ -97,6 +97,7 @@ private class CameraProcessor(context:Context,private val exercise:Exercise,priv
     var processor by remember {mutableStateOf<CameraProcessor?>(null)}
     var started by remember {mutableStateOf(false)}
     var paused by remember {mutableStateOf(false)}
+    var hasTracked by remember {mutableStateOf(false)}
     var countingDown by remember {mutableIntStateOf(0)}
     var latency by remember {mutableLongStateOf(0)}
     var visibleCue by remember {mutableStateOf<String?>(null)}
@@ -134,7 +135,10 @@ private class CameraProcessor(context:Context,private val exercise:Exercise,priv
                             val created=CameraProcessor(context,exercise,profile.experimentalCues,front,{frame,obs,ms->
                                 main.execute {
                                     if(!disposed.get()) {bitmap=frame;observation=obs;latency=ms
-                                        if(started && !paused && !obs.tracking) observations.add("Tracking was interrupted; review the count.")
+                                        if(started && !paused) {
+                                            if(obs.tracking) hasTracked=true
+                                            else if(hasTracked) observations.add("Tracking was interrupted; review the count.")
+                                        }
                                         obs.cue?.let {cue->visibleCue=cue;observations.add(cue);if(profile.voice && started && !paused) tts?.speak(cue,TextToSpeech.QUEUE_FLUSH,null,"movement")}
                                     }
                                 }
@@ -159,11 +163,21 @@ private class CameraProcessor(context:Context,private val exercise:Exercise,priv
         onDispose {disposed.set(true);cameraProvider?.unbindAll();processor=null;executor.execute {analyzer?.close()};executor.shutdown()}
     }
     LaunchedEffect(countingDown) {
-        if(countingDown>0) {delay(1000);if(countingDown>0) {if(countingDown==1) {processor?.reset=true;processor?.started=true;processor?.paused=false;started=true;paused=false};countingDown--}}
+        if(countingDown>0) {
+            if(profile.voice) tts?.speak(countingDown.toString(),TextToSpeech.QUEUE_FLUSH,null,"countdown")
+            delay(1000)
+            if(countingDown>0) {
+                if(countingDown==1) {
+                    hasTracked=false;processor?.reset=true;processor?.started=true;processor?.paused=false;started=true;paused=false
+                    if(profile.voice) tts?.speak("Start",TextToSpeech.QUEUE_FLUSH,null,"countdown")
+                }
+                countingDown--
+            }
+        }
     }
     LaunchedEffect(visibleCue) {if(visibleCue!=null) {delay(4000);visibleCue=null}}
     fun finishOrBack() {
-        processor?.paused=true;tts?.stop()
+        processor?.paused=true;countingDown=0;tts?.stop()
         if(started) onEnd(observation.reps,observation.holdSeconds,observations.toList()) else onBack()
     }
     BackHandler {finishOrBack()}
@@ -192,14 +206,15 @@ private class CameraProcessor(context:Context,private val exercise:Exercise,priv
         }
         failure?.let {Text(it,color=MaterialTheme.colorScheme.error)}
         if(!started) {
-            Text("${exercise.view} view · Keep your whole body visible. Set your device on a stable support.")
-            Text(observation.status)
-            Row {TextButton(onClick={front=!front;failure=null;bitmap=null}) {Text("Flip camera")};TextButton(onClick=onBack) {Text("Use manual logging")}}
-            PrimaryButton("Start tracked set",observation.tracking && failure==null && countingDown==0) {countingDown=3}
+            Text("${exercise.view} view · Tap start, set your device on a stable support, and step back into full-body view.")
+            Text(if(countingDown>0) "Starting in $countingDown… Step into position." else observation.status)
+            Row {TextButton(onClick={front=!front;failure=null;bitmap=null},enabled=countingDown==0) {Text("Flip camera")};TextButton(onClick=onBack) {Text("Use manual logging")}}
+            if(countingDown>0) OutlinedButton(onClick={countingDown=0;tts?.stop()},modifier=Modifier.fillMaxWidth()) {Text("Cancel countdown")}
+            else PrimaryButton("Start tracked set",failure==null) {countingDown=5}
         } else {
             Text(if(exercise.timed) durationText(observation.holdSeconds*1000L) else observation.reps.toString(),style=MaterialTheme.typography.displayLarge,color=MaterialTheme.colorScheme.primary)
             SmallLabel(if(exercise.timed) "TRACKED HOLD TIME" else "ESTIMATED REPS")
-            PanelCard {Text(if(paused || !observation.tracking) observation.status else visibleCue ?: observation.status)}
+            PanelCard {Text(if(paused) observation.status else if(!observation.tracking && !hasTracked) "Step into full-body view to begin · ${observation.status}" else if(!observation.tracking) observation.status else visibleCue ?: observation.status)}
             Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick={paused=!paused;processor?.paused=paused;tts?.stop()},modifier=Modifier.weight(1f)) {Text(if(paused) "Resume" else "Pause")}
                 Button(onClick={processor?.paused=true;tts?.stop();onEnd(observation.reps,observation.holdSeconds,observations.toList())},modifier=Modifier.weight(1f)) {Text("End set")}

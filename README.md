@@ -19,9 +19,17 @@ This is a personal preview, not a reproduction of another app's proprietary vide
 
 ## Build Android
 
-Prerequisites: Android Studio's installed JDK 21, Android SDK platform/build-tools 36 and the verified Gradle 8.11.1 distribution. `scripts/bootstrap.ps1` is a separate, reviewable download step using official Gradle and Google model URLs. Builds do not invoke it automatically.
+Prerequisites: Android Studio's installed JDK 21, Android SDK platform/build-tools 36 and the verified Gradle 8.11.1 distribution. `scripts/bootstrap.sh` (macOS/Linux) and `scripts/bootstrap.ps1` (Windows) are separate, reviewable download steps using official Gradle and Google model URLs. Builds do not invoke them automatically.
 
+macOS / Linux:
+```bash
+./scripts/bootstrap.sh
+./scripts/build.sh
+```
+
+Windows PowerShell:
 ```powershell
+./scripts/bootstrap.ps1
 ./scripts/build.ps1
 ```
 
@@ -35,7 +43,7 @@ Actual emulator captures: [Today](docs/screenshots/today-phone.png), [workout lo
 
 1. **First launch → Profile:** enter name, goal, experience, equipment, weekly target, duration, units and exercise exclusions; save.
 2. **Today → Check in & start:** adjust energy/soreness/time, then start the generated session. Today resumes an unfinished session.
-3. **Workout:** choose a set, enter actual values and save. Open exercise guidance or replace an exercise. Camera-supported exercises open camera setup → permission → position → countdown → tracked set → editable set form. Pause/end controls remain available.
+3. **Workout:** choose a set, enter actual values and save. Open exercise guidance or replace an exercise. Camera-supported exercises open camera setup → permission → tap start → 5-second step-back countdown → tracked set → editable set form. Pause/end controls remain available.
 4. **Finish → Summary:** review logged sets and progression reasons; save the plan as a routine if desired.
 5. **Workouts:** browse/search exercises, start saved routines, or open completed-session history.
 6. **Progress:** view exercise trends and log body weight. Empty states remain empty until you record real data.
@@ -43,38 +51,45 @@ Actual emulator captures: [Today](docs/screenshots/today-phone.png), [workout lo
 8. **Settings:** edit/switch profiles, choose AI provider, pair PC, configure voice/cue/theme preferences, export/import backup, or clear the selected profile's training data.
 9. **Profile button at the top of root screens:** switch or add a profile. Each profile keeps its unfinished workout. Profiles are separate data collections, not password-protected user accounts.
 
-## Windows AI companion
+## Local AI companion (macOS & Windows)
 
-The companion uses the installed Node 24 runtime and Codex CLI. No cloud server or paid API is required for workout logging or camera tracking. ChatGPT mode uses an official Codex App Server client with its own local login; the PC must stay awake. Subscription availability and limits still apply.
+The companion uses the installed Node 24+ runtime and Codex CLI. No cloud server or paid API is required for workout logging or camera tracking. ChatGPT mode uses an official Codex App Server client with its own local login; the computer must stay awake. Subscription availability and limits still apply.
 
-```powershell
-Set-Location companion
+```bash
+cd companion
 npm ci --ignore-scripts --registry=https://registry.npmjs.org
 node src/cli.mjs setup
 node src/cli.mjs login
-node src/cli.mjs serve --host YOUR_PC_PRIVATE_IPV4
+node src/cli.mjs serve --host YOUR_PRIVATE_IPV4
 ```
 
-`setup` uses the OpenSSL executable already installed with Git for Windows to create a local TLS identity. It protects only `companion/.state` for the current Windows user, SYSTEM and Administrators. It does not install services, change antivirus settings, alter execution policy or open firewall ports.
+`setup` uses the installed OpenSSL executable to create a local TLS identity. It restricts `companion/.state` (`0700`/`0600` on macOS/Linux; ACLs for the current user, SYSTEM and Administrators on Windows). It does not install services, change antivirus settings, alter execution policy or open firewall ports.
 
 Open `companion/.state/pairing.html` locally. On Android, choose **Settings → Scan PC pairing QR** (or Paste invitation). Each invitation expires after five minutes and works once; restart the companion to generate a new one. Pair phone and tablet separately. The app pins the TLS certificate fingerprint from the invitation. It will refuse a changed certificate until paired again.
 
-Use your trusted private network. If Windows asks about network access, limit it to your private network. Do not forward the companion port from your router. Default `serve` binds only to loopback for local testing; specify the PC's private IPv4 to connect a physical device.
+Use your trusted private network. If your OS asks about network access, limit it to your private network. Do not forward the companion port from your router. Default `serve` binds only to loopback for local testing; specify your computer's private IPv4 to connect a physical device.
 
-```powershell
+```bash
 node src/cli.mjs status
 node src/cli.mjs devices
 node src/cli.mjs revoke DEVICE_ID
 ```
 
-API providers are optional. Save a key interactively on the PC; do not paste it into the mobile app or source files:
+API providers are optional. Save a key interactively on your computer; do not paste it into the mobile app or source files:
 
+macOS / Linux:
+```bash
+./scripts/credential.sh Set openai
+./scripts/credential.sh Set claude
+```
+
+Windows PowerShell:
 ```powershell
 ./scripts/credential.ps1 -Action Set -Name openai
 ./scripts/credential.ps1 -Action Set -Name claude
 ```
 
-Windows user encryption protects stored API keys. Run the companion as the same Windows account that saved them. The internal `Read` action is for the companion process only; it emits a decrypted key to its pipe and must not be run in a visible terminal.
+macOS login Keychain or Windows user encryption protects stored API keys. Run the companion as the same user account that saved them. The internal `Read` action is for the companion process only; it emits a decrypted key to its pipe and must not be run in a visible terminal.
 
 ## Budget and data
 
@@ -83,7 +98,7 @@ Windows user encryption protects stored API keys. Run the companion as the same 
 - The same device/profile/request ID is never automatically billed twice. Incomplete requests after a crash retain their reservation. No automatic provider fallback or paid retry occurs.
 - The budget covers requests through this companion only, not other uses of your API account, taxes or future provider price changes. Review provider prices before changing model IDs or prices. Deleting the journal resets its records; keep it backed up on the PC.
 - The companion sends only the selected profile, prompt, active workout and bounded recent history, including up to eight recent chat messages, to the selected AI provider. It does not receive video frames. Replies and request hashes are stored locally for retry handling; device tokens are stored as hashes.
-- The app database stores a validated `ProfileStore` snapshot atomically in Room. Profile selection and updates are serialized. AI replies retain their originating profile; restoring/clearing data invalidates in-flight replies.
+- The app persists a validated `ProfileStore` snapshot atomically. Profile selection and updates are serialized. AI replies retain their originating profile; restoring/clearing data invalidates in-flight replies.
 - Backup uses AES-256-GCM with PBKDF2-HMAC-SHA256, random salt/nonce, and authenticated format header. It transfers all profiles. Import requires password and replacement confirmation. Personal video URIs and companion credentials do not transfer.
 
 ## Camera limits and validation
@@ -98,10 +113,10 @@ Before relying on coaching, validate on **both S22 and Tab A9+**: supported vari
 
 ## Tests and source trust
 
-```powershell
-./scripts/build.ps1
+```bash
+./scripts/build.sh
 node --test companion/test/*.test.mjs
-python scripts/verify_downloads.py
+python3 scripts/verify_downloads.py
 ```
 
 Android dependencies resolve from Google Maven, Maven Central and Gradle's plugin repository. The companion's only direct npm dependency is pinned `qrcode` 1.5.4, installed with lifecycle scripts disabled and locked integrity hashes. The model comes from Google's versioned MediaPipe model storage. See `docs/SECURITY_REVIEW.md` for the prior Defender incident and evidence; no blanket malware-free guarantee is made.

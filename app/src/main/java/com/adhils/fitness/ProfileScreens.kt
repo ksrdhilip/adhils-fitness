@@ -11,7 +11,7 @@ import com.adhils.fitness.core.*
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable fun ProfileScreen(original:Profile,onSave:(Profile)->Unit,onBack:(()->Unit)?) {
-    var p by remember(original.name) { mutableStateOf(original) }
+    var p by remember(original) { mutableStateOf(original) }
     ScreenHeader(if(original.onboardingComplete) "Edit profile" else "Make it yours",onBack)
     Text("Plans, workout history, progress, and AI suggestions belong to this profile.")
     OutlinedTextField(value=p.name,onValueChange={p=p.copy(name=it.take(80))},label={Text("Name")},modifier=Modifier.fillMaxWidth(),singleLine=true)
