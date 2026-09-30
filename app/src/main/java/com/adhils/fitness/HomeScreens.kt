@@ -16,45 +16,147 @@ import com.adhils.fitness.core.*
 import java.time.*
 import java.time.format.DateTimeFormatter
 
-@Composable fun TodayScreen(state:AppState,onStart:()->Unit,onResume:()->Unit,onExercise:(String)->Unit,onHistory:()->Unit) {
+@OptIn(ExperimentalLayoutApi::class)
+@Composable fun TodayScreen(state:AppState,vm:FitnessViewModel,onStart:()->Unit,onResume:()->Unit,onExercise:(String)->Unit,onHistory:()->Unit) {
     val p=state.profile
-    val preview=remember(state) { runCatching { Training.generate(state,CheckIn(minutes=p.minutes)) }.getOrNull() }
-    val greeting=when(LocalTime.now().hour) {in 5..11->"Good morning";in 12..16->"Good afternoon";else->"Good evening"}
-    Text("$greeting, ${p.name}",style=MaterialTheme.typography.titleMedium)
-    SmallLabel(LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, MMMM d")))
-    Column {
-        Text("Make time",fontSize=36.sp,lineHeight=40.sp,fontWeight=FontWeight.Bold)
-        Text("for stronger.",fontSize=36.sp,lineHeight=40.sp,fontWeight=FontWeight.Bold,color=MaterialTheme.colorScheme.primary)
+    var quickFocus by remember { mutableStateOf("Fresh Muscle Groups") }
+    var quickMuscles by remember { mutableStateOf(emptySet<String>()) }
+    var quickMinutes by remember(p.minutes) { mutableIntStateOf(p.minutes) }
+    var quickSupersets by remember { mutableStateOf(false) }
+    var showGymMenu by remember { mutableStateOf(false) }
+    var showSplitMenu by remember { mutableStateOf(false) }
+    var showMusclePicker by remember { mutableStateOf(false) }
+    var showDurationMenu by remember { mutableStateOf(false) }
+
+    val quickCheck=remember(quickFocus,quickMuscles,quickMinutes,quickSupersets) {
+        CheckIn(energy=3,soreness=0,minutes=quickMinutes,feeling="Good",focus=quickFocus,targetMuscles=quickMuscles,supersets=quickSupersets)
     }
+    val preview=remember(state,quickCheck) { runCatching { Training.generate(state,quickCheck) }.getOrNull() }
+    val recovery=remember(state) { Recovery.calculate(state) }
+
+    // Fitbod Top Gym Profile Bar + Consolidated Filter Pills
     PanelCard {
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
+            Box {
+                FilledTonalButton(onClick={showGymMenu=true},modifier=Modifier.heightIn(min=48.dp)) {
+                    Icon(Icons.Default.FitnessCenter,null,Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("${p.gymPreset} ▾",fontWeight=FontWeight.Bold)
+                }
+                DropdownMenu(expanded=showGymMenu,onDismissRequest={showGymMenu=false}) {
+                    listOf("Home Gym","Commercial Gym","Bodyweight / Travel").forEach { preset ->
+                        DropdownMenuItem(
+                            text={Text((if(p.gymPreset==preset) "✓ " else "")+preset)},
+                            onClick={vm.switchGymPreset(preset);showGymMenu=false}
+                        )
+                    }
+                }
+            }
+            TextButton(onClick=onStart,modifier=Modifier.heightIn(min=48.dp)) {
+                Text("Check-in & AI ⚙")
+            }
+        }
+        SmallLabel("WORKOUT GENERATOR FILTERS")
+        FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            Box {
+                FilterChip(
+                    selected=true,
+                    onClick={showSplitMenu=true},
+                    label={Text(quickFocus.substringBefore(" (")+" ▾")},
+                    modifier=Modifier.heightIn(min=42.dp)
+                )
+                DropdownMenu(expanded=showSplitMenu,onDismissRequest={showSplitMenu=false}) {
+                    listOf("Fresh Muscle Groups","Full Body","Upper Body","Lower Body","Push (Chest & Shoulders)","Pull (Back & Biceps)","Core & Mobility").forEach { sp ->
+                        DropdownMenuItem(
+                            text={Text((if(quickFocus==sp) "✓ " else "")+sp)},
+                            onClick={quickFocus=sp;showSplitMenu=false}
+                        )
+                    }
+                }
+            }
+            FilterChip(
+                selected=quickMuscles.isNotEmpty() || showMusclePicker,
+                onClick={showMusclePicker=!showMusclePicker},
+                label={Text(if(quickMuscles.isEmpty()) "Target Muscles ▾" else "Muscles (${quickMuscles.size}) ▾")},
+                modifier=Modifier.heightIn(min=42.dp)
+            )
+            Box {
+                FilterChip(
+                    selected=false,
+                    onClick={showDurationMenu=true},
+                    label={Text("${quickMinutes}m ▾")},
+                    modifier=Modifier.heightIn(min=42.dp)
+                )
+                DropdownMenu(expanded=showDurationMenu,onDismissRequest={showDurationMenu=false}) {
+                    listOf(20,30,40,45,60,75).forEach { m ->
+                        DropdownMenuItem(
+                            text={Text("${m} min")},
+                            onClick={quickMinutes=m;showDurationMenu=false}
+                        )
+                    }
+                }
+            }
+            FilterChip(
+                selected=quickSupersets,
+                onClick={quickSupersets=!quickSupersets},
+                label={Text(if(quickSupersets) "⚡ Supersets ON" else "⚡ Supersets OFF")},
+                modifier=Modifier.heightIn(min=42.dp)
+            )
+        }
+        if(showMusclePicker) {
+            FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                Recovery.ALL_MUSCLES.forEach { m ->
+                    val sel=m in quickMuscles
+                    FilterChip(
+                        selected=sel,
+                        onClick={quickMuscles=if(sel) quickMuscles-m else quickMuscles+m},
+                        label={Text(m)}
+                    )
+                }
+            }
+        }
+        HorizontalDivider(color=MaterialTheme.colorScheme.outline)
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                SmallLabel(if(state.active!=null) "READY WHEN YOU ARE" else "TODAY’S WORKOUT")
-                Text(state.active?.title ?: preview?.title ?: "Set up your workout",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.SemiBold)
-                SmallLabel("About ${p.minutes} min · ${state.active?.plan?.size ?: preview?.plan?.size ?: 0} exercises")
+                SmallLabel(if(state.active!=null) "ACTIVE WORKOUT IN PROGRESS" else "GENERATED FITBOD WORKOUT")
+                Text(state.active?.title ?: preview?.title ?: "Set up your workout",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Bold)
+                SmallLabel("${state.active?.plan?.size ?: preview?.plan?.size ?: 0} Exercises · ${quickMinutes} Min · ${p.equipment.joinToString(", ")}")
             }
-            Icon(Icons.Default.FitnessCenter,null,Modifier.size(48.dp),tint=MaterialTheme.colorScheme.primary)
         }
-        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-            p.equipment.take(2).forEach { SuggestionChip(onClick={},label={ Text(it) }) }
-        }
-        PrimaryButton(if(state.active!=null) "Resume workout →" else "Check in & start →",
-            enabled=state.active!=null || preview!=null,onClick=if(state.active!=null) onResume else onStart)
+        PrimaryButton(
+            text=if(state.active!=null) "Resume Active Workout →" else "Start Workout (${preview?.plan?.size ?: 0} Exercises) →",
+            enabled=state.active!=null || preview!=null,
+            onClick={
+                if(state.active!=null) onResume()
+                else {
+                    vm.start(quickCheck)
+                    onResume()
+                }
+            }
+        )
     }
+
+    SectionTitle("Workout Exercises", "Tap any exercise card for posture video & 1RM history")
+    (state.active ?: preview)?.plan?.forEach { planned ->
+        ExerciseRow(planned) { onExercise(planned.exerciseId) }
+    }
+
+    MuscleHeatmapCard(recovery)
+
     val today=LocalDate.now()
     val monday=today.minusDays((today.dayOfWeek.value-1).toLong())
     val done=state.sessions.filter { it.finishedAt!=null }.map { Instant.ofEpochMilli(it.finishedAt!!).atZone(ZoneId.systemDefault()).toLocalDate() }
     val weekCount=done.count { !it.isBefore(monday) && it.isBefore(monday.plusDays(7)) }
     PanelCard {
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
-            Text("Your week",fontWeight=FontWeight.SemiBold)
+            Text("Weekly Goal Streak",fontWeight=FontWeight.Bold)
             SmallLabel("$weekCount of ${p.days} workouts")
         }
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
             (0..6).forEach { i ->
                 val date=monday.plusDays(i.toLong()); val checked=date in done
                 Column(horizontalAlignment=Alignment.CenterHorizontally) {
-                    Box(Modifier.size(30.dp).background(if(checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface, CircleShape),Alignment.Center) {
+                    Box(Modifier.size(34.dp).background(if(checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, CircleShape),Alignment.Center) {
                         if(checked) Icon(Icons.Default.Check,null,Modifier.size(18.dp),tint=MaterialTheme.colorScheme.onPrimary)
                         else Text(if(date==today) "•" else "",color=MaterialTheme.colorScheme.primary)
                     }
@@ -62,22 +164,20 @@ import java.time.format.DateTimeFormatter
                 }
             }
         }
-        TextButton(onClick=onHistory) { Text("View workout history") }
-    }
-    SectionTitle("Coming up")
-    (state.active ?: preview)?.plan?.filter { Catalog.get(it.exerciseId).pattern !in setOf("Warm-up","Mobility") }?.take(3)?.forEach {
-        ExerciseRow(it) { onExercise(it.exerciseId) }
+        TextButton(onClick=onHistory,modifier=Modifier.heightIn(min=48.dp)) { Text("View Workout Log & Saved Routines →") }
     }
 }
 @OptIn(ExperimentalLayoutApi::class)
 @Composable fun CheckInScreen(p:Profile,onStart:(CheckIn)->Unit,onBack:()->Unit,onAskCoach:((CheckIn)->Unit)?=null) {
     var feeling by remember { mutableStateOf("Good") }
-    var focus by remember { mutableStateOf("Full Body") }
+    var focus by remember { mutableStateOf("Fresh Muscle Groups") }
+    var targetMuscles by remember { mutableStateOf(emptySet<String>()) }
+    var supersets by remember { mutableStateOf(false) }
     var energy by remember { mutableFloatStateOf(3f) }
     var soreness by remember { mutableIntStateOf(0) }
     var minutes by remember { mutableFloatStateOf(p.minutes.toFloat()) }
     ScreenHeader("Your check-in",onBack)
-    SectionTitle("Make today work for you","Tell us how you feel and your focus to customize today’s exercises.")
+    SectionTitle("Make today work for you","Tell us how you feel, your split focus, or pick specific target muscles.")
     PanelCard {
         Text("How are you feeling today?",fontWeight=FontWeight.SemiBold)
         FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
@@ -91,9 +191,25 @@ import java.time.format.DateTimeFormatter
         }
         Text("What is your focus today?",fontWeight=FontWeight.SemiBold)
         FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-            listOf("Full Body","Upper Body","Lower Body","Push (Chest & Shoulders)","Pull (Back & Biceps)","Core & Mobility").forEach { item ->
+            listOf("Fresh Muscle Groups","Full Body","Upper Body","Lower Body","Push (Chest & Shoulders)","Pull (Back & Biceps)","Core & Mobility").forEach { item ->
                 FilterChip(selected=focus==item,onClick={focus=item},label={Text(item)})
             }
+        }
+        Text("Target specific muscles (optional multi-select)",fontWeight=FontWeight.SemiBold)
+        FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+            Recovery.ALL_MUSCLES.forEach { m ->
+                val selected=m in targetMuscles
+                FilterChip(selected=selected,onClick={
+                    targetMuscles=if(selected) targetMuscles-m else targetMuscles+m
+                },label={Text(m)})
+            }
+        }
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Enable Supersets / Circuits",fontWeight=FontWeight.SemiBold)
+                SmallLabel("Pair exercises back-to-back with 15s transition rest")
+            }
+            Switch(checked=supersets,onCheckedChange={supersets=it})
         }
         Text("Energy · ${energy.toInt()} of 5")
         Slider(value=energy,onValueChange={ energy=it },valueRange=1f..5f,steps=3)
@@ -108,8 +224,9 @@ import java.time.format.DateTimeFormatter
         Text("Today’s plan will use lighter volume and recovery-friendly sets.")
     }
     if(p.restrictions.isNotBlank()) Text("Your note: ${p.restrictions}. Excluded exercises are filtered; review the plan before lifting.")
-    val check=CheckIn(energy.toInt(),soreness,minutes.toInt(),feeling,focus)
-    PrimaryButton("Start ${focus.substringBefore(" (")} workout") { onStart(check) }
+    val check=CheckIn(energy.toInt(),soreness,minutes.toInt(),feeling,focus,targetMuscles,supersets)
+    val buttonTitle=if(targetMuscles.isNotEmpty()) "Start ${targetMuscles.take(2).joinToString(" & ")} workout" else "Start ${focus.substringBefore(" (")} workout"
+    PrimaryButton(buttonTitle) { onStart(check) }
     if(onAskCoach!=null) {
         OutlinedButton(onClick={ onAskCoach(check) },modifier=Modifier.fillMaxWidth()) {
             Text("Ask AI Coach to customize today’s exercises")

@@ -57,8 +57,8 @@ class MainActivity:ComponentActivity() {
     var discard by remember { mutableStateOf(false) }
     val pageScroll=remember(route,if(route=="active") state.active?.currentExercise else null) {ScrollState(0)}
     val roots=listOf("today","workouts","progress","coach","settings")
-    val labels=listOf("Today","Workouts","Progress","Coach","Settings")
-    val icons=listOf(Icons.Default.Home,Icons.Default.FitnessCenter,Icons.Default.BarChart,Icons.Default.ChatBubbleOutline,Icons.Default.Settings)
+    val labels=listOf("Workout","Log","Recovery","AI Coach","Gym")
+    val icons=listOf(Icons.Default.FitnessCenter,Icons.Default.History,Icons.Default.BarChart,Icons.Default.ChatBubbleOutline,Icons.Default.Settings)
     fun showExercise(id:String) { previous=route; route="exercise:$id" }
     fun back() { route=when { route=="camera"->"active"; route.startsWith("exercise:")->previous; else->"today" } }
     BackHandler(route !in roots) { if(route=="active") leave=true else back() }
@@ -77,20 +77,23 @@ class MainActivity:ComponentActivity() {
                     horizontalAlignment=Alignment.CenterHorizontally) {
                     Column(Modifier.widthIn(max=700.dp).fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(18.dp)) {
                         if(route in roots) ScreenHeader("ADhils Fitness",action={
-                            FilledTonalButton(onClick={profiles=true}) { Text(state.profile.name.take(18)+" ▾") }
+                            FilledTonalButton(onClick={profiles=true},modifier=Modifier.heightIn(min=48.dp)) { Text(state.profile.name.take(18)+" ▾") }
                         })
                         when {
                             route=="profile" -> ProfileScreen(state.profile,onSave={vm.saveProfile(it);route="today"},onBack=if(state.profile.onboardingComplete) ({route="settings"}) else null)
-                            route=="today" -> TodayScreen(state,{route="checkin"},{route="active"},::showExercise,{route="workouts"})
+                            route=="today" -> TodayScreen(state,vm,{route="checkin"},{route="active"},::showExercise,{route="workouts"})
                             route=="checkin" -> CheckInScreen(state.profile,{vm.start(it);route="active"},{route="today"}) { check ->
-                                val prompt="I am feeling ${check.feeling} today (energy ${check.energy}/5, soreness ${check.soreness}/2). My focus today is ${check.focus} and I have ${check.minutes} minutes. Please propose today's workout exercise list using the available catalog exercises (with replacePlan: true)."
+                                val targetNote=if(check.targetMuscles.isNotEmpty()) " Target muscles: ${check.targetMuscles.joinToString(", ")}."
+                                    else if(check.focus=="Fresh Muscle Groups") " Freshest recovered muscles: ${Recovery.freshestMuscles(state,4).joinToString(", ")}."
+                                    else ""
+                                val prompt="I am feeling ${check.feeling} today (energy ${check.energy}/5, soreness ${check.soreness}/2). My focus today is ${check.focus} and I have ${check.minutes} minutes.$targetNote Please propose today's workout exercise list using the available catalog exercises (with replacePlan: true)."
                                 vm.ask(prompt,false)
                                 route="coach"
                             }
                             route=="workouts" -> LibraryScreen(state,::showExercise,{vm.start(CheckIn(minutes=state.profile.minutes),it);route="active"},{route="summary:$it"})
                             route=="active" -> state.active?.let { s -> WorkoutScreen(state,s,vm,{leave=true},::showExercise,{route="camera"},{vm.finish();route="summary:${s.id}"}) }
                                 ?: EmptyState("Getting your workout ready","Your sets are saved as you train.")
-                            route=="camera" -> state.active?.let { s -> CameraCoachScreen(Catalog.get(s.plan[s.currentExercise].exerciseId),state.profile,{route="active"}) { reps,seconds,notes ->
+                            route=="camera" -> state.active?.let { s -> CameraCoachScreen(Catalog.get(s.plan[s.currentExercise].exerciseId),state,vm,{route="active"}) { reps,seconds,notes ->
                                 CameraDraft.value=CameraSetDraft(store.selectedId,s.id,s.plan[s.currentExercise].exerciseId,reps,seconds,notes);route="active"
                             } }
                             route.startsWith("exercise:") -> ExerciseScreen(route.substringAfter(":"),state,vm,::back)

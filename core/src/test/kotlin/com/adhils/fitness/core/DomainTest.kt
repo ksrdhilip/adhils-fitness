@@ -79,6 +79,7 @@ class DomainTest {
         assertTrue(Catalog.exercises.size>=60)
         assertTrue(Catalog.exercises.all { it.equipment in setOf("Bodyweight","Dumbbells","Bands","Bench") })
         assertTrue(Catalog.exercises.all { it.camera==null || it.camera in setOf("squat","rdl","press","pushup","plank") })
+        assertTrue(Catalog.exercises.all { it.effectiveCamera in setOf("squat","rdl","press","pushup","plank","pull") })
         for(eq in listOf(setOf("Bodyweight"),setOf("Bodyweight","Dumbbells"),setOf("Bodyweight","Bands"),setOf("Bodyweight","Dumbbells","Bench"))) {
             var state=AppState(profile=Profile(equipment=eq))
             for(v in 0..3) {
@@ -86,5 +87,41 @@ class DomainTest {
                 state=state.copy(sessions=state.sessions+generated.copy(finishedAt=1000L+v)).validated()
             }
         }
+    }
+    @Test fun recoveryEngine1RmPrsSupersetsAndTargetMusclesWork() {
+        val now=System.currentTimeMillis()
+        val pastSession=Session(
+            id="past-1",
+            plan=listOf(PlannedExercise("goblet-squat"),PlannedExercise("pushup")),
+            startedAt=now-3_600_000L,
+            finishedAt=now-1_800_000L,
+            results=listOf(
+                SetResult(exerciseId="goblet-squat",setIndex=0,reps=10,weightKg=20.0,rpe=9,savedAt=now-1_800_000L),
+                SetResult(exerciseId="goblet-squat",setIndex=1,reps=10,weightKg=20.0,rpe=9,savedAt=now-1_800_000L),
+                SetResult(exerciseId="goblet-squat",setIndex=2,reps=10,weightKg=20.0,rpe=9,savedAt=now-1_800_000L)
+            )
+        )
+        val state=AppState(sessions=listOf(pastSession))
+        val recovery=Recovery.calculate(state,now)
+        val quads=recovery.first { it.muscle=="Quads" }
+        val chest=recovery.first { it.muscle=="Chest" }
+        assertTrue(quads.recoveryPercent<80)
+        assertEquals(100,chest.recoveryPercent)
+        assertTrue("Quads" !in Recovery.freshestMuscles(state,4,now))
+
+        // Epley 1RM & PR detection
+        val est1Rm=Recovery.estimate1RMKg(20.0,10)
+        assertTrue(est1Rm>26.0)
+        val prBadges=Recovery.detectPRs(state,"active-1",SetResult(exerciseId="goblet-squat",setIndex=0,reps=12,weightKg=25.0))
+        assertTrue(prBadges.any { it.contains("Max Weight PR") })
+        assertTrue(prBadges.any { it.contains("1RM PR") })
+
+        // Target muscle multi-select & Supersets
+        val supersetSession=Training.generate(state,CheckIn(minutes=35,focus="Fresh Muscle Groups",targetMuscles=setOf("Chest","Back"),supersets=true))
+        assertTrue(supersetSession.plan.any { it.supersetGroup=="A" })
+        val firstEx=supersetSession.plan.first { it.supersetGroup=="A" }
+        val firstIdx=supersetSession.plan.indexOf(firstEx)
+        val afterFirstSet=Training.saveSet(supersetSession.copy(currentExercise=firstIdx),SetResult(exerciseId=firstEx.exerciseId,setIndex=0,reps=10,weightKg=10.0))
+        assertNotEquals(firstIdx,afterFirstSet.currentExercise)
     }
 }

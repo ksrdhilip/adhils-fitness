@@ -43,7 +43,7 @@ fun youtubePostureUrl(e: Exercise, savedUri: String?): String {
 }
 
 @SuppressLint("SetJavaScriptEnabled")
-@Composable fun ExercisePostureMediaCard(e: Exercise, state: AppState, vm: FitnessViewModel) {
+@Composable fun ExercisePostureMediaCard(e: Exercise, state: AppState, vm: FitnessViewModel, onOpenCameraCoach: (() -> Unit)? = null) {
     val context = LocalContext.current
     val originProfile = remember { vm.store.value.selectedId }
     val savedUri = state.videos[e.id]
@@ -54,6 +54,8 @@ fun youtubePostureUrl(e: Exercise, savedUri: String?): String {
     var customUrlInput by remember(e.id, savedUri) {
         mutableStateOf(if (savedUri != null && savedUri.startsWith("http")) savedUri else "")
     }
+    val postureFeedback by vm.livePostureFeedback.collectAsState()
+    val postureBusy by vm.postureBusy.collectAsState()
     val chooseVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching {
@@ -134,6 +136,28 @@ fun youtubePostureUrl(e: Exercise, savedUri: String?): String {
             }
             SmallLabel("Tap Play to load YouTube posture videos right here · ${e.view.lowercase()} view for camera tracking")
         }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = { vm.askPostureFeedback(e, PoseObservation(formScore = 92, status = "Reviewing reference video posture"), currentWebUrl) },
+                enabled = !postureBusy,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(if (postureBusy) "AI reviewing video…" else "🤖 AI Video Posture Checkpoints")
+            }
+            if (onOpenCameraCoach != null) {
+                Button(onClick = onOpenCameraCoach, modifier = Modifier.weight(1f)) {
+                    Text("🎥 Live Rep Coach")
+                }
+            }
+        }
+        postureFeedback?.let { tip ->
+            Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+                Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SmallLabel("AI POSTURE COACH · NEXT REP FOCUS")
+                    Text(tip, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                }
+            }
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             TextButton(onClick = {
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(youtubePostureUrl(e, savedUri)))
@@ -189,22 +213,32 @@ fun youtubePostureUrl(e: Exercise, savedUri: String?): String {
     SectionTitle("How to perform")
     e.instructions.forEachIndexed {i,text->Text("${i+1}. $text")}
     SectionTitle("Breathing",e.breathing)
-    if(e.camera!=null) PanelCard {SectionTitle("Camera placement","${e.view} view. Keep your shoulders, hands, hips, and feet in frame. Use a stable stand.");SmallLabel("Supported variation: ${e.name}. Other variations may not track correctly.")}
+    PanelCard {SectionTitle("AI Camera & Posture placement","${e.view} view (${e.effectiveCamera} biomechanics). Keep your shoulders, hands, hips, and feet in frame. Use a stable stand.");SmallLabel("Tracks live joint angles and gives rep-by-rep posture corrections for ${e.name}.")}
     val alternatives=Catalog.alternatives(id,state.profile)
     if(alternatives.isNotEmpty()) {SectionTitle("Alternatives for this profile");alternatives.forEach {Text("• ${it.name}")}}
 }
 @Composable fun SummaryScreen(s:Session,state:AppState,vm:FitnessViewModel,onDone:()->Unit,onCoach:()->Unit) {
     ScreenHeader("Workout summary",onDone)
     SectionTitle(s.title,Instant.ofEpochMilli(s.startedAt).atZone(ZoneId.systemDefault()).toLocalDate().toString())
+    val totalVolKg=remember(s.results) { Recovery.sessionVolumeKg(s) }
     PanelCard {
         Text("${s.results.size} logged sets · ${durationText((s.finishedAt ?: System.currentTimeMillis())-s.startedAt)} elapsed")
+        Text("Total Session Volume (Tonnage): ${weightLabel(totalVolKg,state.profile)}",color=MaterialTheme.colorScheme.primary)
         SmallLabel("Elapsed time includes breaks and time away from the app.")
     }
     s.plan.forEach {p->val results=s.results.filter {it.exerciseId==p.exerciseId};val e=Catalog.get(p.exerciseId)
         if(results.isNotEmpty()) PanelCard {
             SectionTitle(e.name)
-            results.sortedBy {it.setIndex}.forEach {r->SmallLabel("Set ${r.setIndex+1}: "+if(e.timed) "${r.seconds} seconds" else "${weightLabel(r.weightKg,state.profile)}${if(e.perHand) " / hand" else ""} × ${r.reps}")}
-            if(!e.timed) Text(Training.nextLoad(e.id,state).reason)
+            results.sortedBy {it.setIndex}.forEach {r->
+                val typeTag=if(r.setType!="Working") " [${r.setType}]" else ""
+                SmallLabel("Set ${r.setIndex+1}$typeTag: "+if(e.timed) "${r.seconds} seconds" else "${weightLabel(r.weightKg,state.profile)}${if(e.perHand) " / hand" else ""} × ${r.reps}")
+                r.observations.forEach { obs -> SmallLabel("  🎥 $obs") }
+            }
+            if(!e.timed) {
+                val best1Rm=results.filter { !it.warmup }.maxOfOrNull { Recovery.estimate1RMKg(it.weightKg,it.reps) } ?: 0.0
+                if(best1Rm>0.0) SmallLabel("Session Est. 1RM: ${weightLabel(best1Rm,state.profile)}")
+                Text(Training.nextLoad(e.id,state).reason)
+            }
         }
     }
     var saved by remember {mutableStateOf(false)}
@@ -214,12 +248,17 @@ fun youtubePostureUrl(e: Exercise, savedUri: String?): String {
 }
 @Composable fun ProgressScreen(state:AppState,vm:FitnessViewModel) {
     val p=state.profile;val completed=state.sessions.filter {it.finishedAt!=null}
-    SectionTitle("Your progress","${p.name} · Built one session at a time.")
-    if(completed.isEmpty()) EmptyState("Your first milestone awaits","Complete a workout to see your exercise trends and personal records.")
+    val recovery=remember(state) { Recovery.calculate(state) }
+    SectionTitle("Recovery & Analytics","${p.name} · Anatomical fatigue heat map, tonnage & 1RM trends.")
+    MuscleHeatmapCard(recovery,defaultExpanded=true)
+    if(completed.isEmpty()) EmptyState("Your first milestone awaits","Complete a workout to see your exercise trends, tonnage, and personal records.")
     else {
         val since=System.currentTimeMillis()-28L*24*3600*1000
+        val recentVolKg=completed.filter {it.finishedAt!!>=since}.sumOf { Recovery.sessionVolumeKg(it) }
+        val totalVolKg=completed.sumOf { Recovery.sessionVolumeKg(it) }
         PanelCard {
             Text("${completed.count {it.finishedAt!!>=since}} workouts in the last 28 days",style=MaterialTheme.typography.titleLarge)
+            Text("28-Day Volume: ${weightLabel(recentVolKg,p)} · Lifetime Volume: ${weightLabel(totalVolKg,p)}",color=MaterialTheme.colorScheme.primary)
             SmallLabel("${completed.size} completed workouts · ${completed.sumOf {it.results.count {r->!r.warmup}}} working sets total")
         }
         val ids=completed.flatMap {it.results}.map {it.exerciseId}.distinct()
@@ -230,10 +269,14 @@ fun youtubePostureUrl(e: Exercise, savedUri: String?): String {
             (s.finishedAt!! to if(e.timed) sets.maxOf {it.seconds}.toDouble() else fromKg(sets.maxOf {it.weightKg},p.unit))
         }}.sortedBy {it.first}
         val records=completed.flatMap {it.results}.filter {it.exerciseId==id && !it.warmup}
+        val best1RmKg=Recovery.best1RMKg(state,id)
         PanelCard {
             if(records.isNotEmpty()) {
                 Text(if(e.timed) "Longest hold · ${records.maxOf {it.seconds}} sec" else "Highest logged weight · ${weightLabel(records.maxOf {it.weightKg},p)}${if(e.perHand) " / hand" else ""}")
-                if(!e.timed) Text("Most reps · ${records.maxOf {it.reps}}")
+                if(!e.timed) {
+                    Text("Estimated 1RM (Epley) · ${weightLabel(best1RmKg,p)}${if(e.perHand) " / hand" else ""}",color=MaterialTheme.colorScheme.primary)
+                    Text("Most reps · ${records.maxOf {it.reps}}")
+                }
             }
             if(values.size<2) SmallLabel("Log this exercise in another workout to see a trend.")
             else {

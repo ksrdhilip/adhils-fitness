@@ -23,16 +23,62 @@ import com.adhils.fitness.core.*
     FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
         listOf("Beginner","Intermediate","Advanced").forEach { v -> FilterChip(selected=p.experience==v,onClick={p=p.copy(experience=v)},label={Text(v)}) }
     }
-    SectionTitle("Equipment")
-    FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-        listOf("Bodyweight","Dumbbells","Bands","Bench").forEach { v -> FilterChip(selected=v in p.equipment,onClick={p=p.copy(equipment=if(v in p.equipment) p.equipment-v else p.equipment+v)},label={Text(v)}) }
+    SectionTitle("Gym Environment Profile","Switch instantly between saved gym environments.")
+    FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+        listOf(
+            "Home Gym" to setOf("Bodyweight","Dumbbells","Bands"),
+            "Commercial Gym" to setOf("Bodyweight","Dumbbells","Bands","Bench"),
+            "Bodyweight / Travel" to setOf("Bodyweight")
+        ).forEach { (preset,eq) ->
+            FilterChip(
+                selected=p.gymPreset==preset,
+                onClick={p=p.copy(gymPreset=preset,equipment=eq)},
+                label={Text(preset)},
+                modifier=Modifier.heightIn(min=48.dp)
+            )
+        }
+    }
+    SectionTitle("Available Equipment","Grouped multi-select equipment filters for ${p.gymPreset}")
+    PanelCard {
+        listOf(
+            Triple("Free Weights","Dumbbells","Adjustable or fixed dumbbells (goblet squats, presses, rows, curls)"),
+            Triple("Benches & Racks","Bench","Flat or incline workout bench (bench press, hip thrusts, split squats, step-ups)"),
+            Triple("Bands & Cables","Bands","Loop or handle resistance bands (band rows, face pulls, band RDLs, pressdowns)"),
+            Triple("Bodyweight","Bodyweight","Calisthenics & floor movements (push-ups, planks, lunges, bridges)")
+        ).forEach { (category,eqKey,desc) ->
+            val checked=eqKey in p.equipment
+            Surface(
+                onClick={p=p.copy(equipment=if(checked) p.equipment-eqKey else p.equipment+eqKey)},
+                shape=androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                color=MaterialTheme.colorScheme.surfaceVariant,
+                modifier=Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min=56.dp).padding(horizontal=12.dp,vertical=10.dp),
+                    verticalAlignment=androidx.compose.ui.Alignment.CenterVertically,
+                    horizontalArrangement=Arrangement.spacedBy(12.dp)
+                ) {
+                    Checkbox(checked=checked,onCheckedChange={c->p=p.copy(equipment=if(c) p.equipment+eqKey else p.equipment-eqKey)})
+                    Column(Modifier.weight(1f)) {
+                        Text("$category · $eqKey",fontWeight=androidx.compose.ui.text.font.FontWeight.Bold)
+                        SmallLabel(desc)
+                    }
+                }
+            }
+        }
     }
     PanelCard {
         Text("Weekly goal · ${p.days} workouts")
         Slider(value=p.days.toFloat(),onValueChange={p=p.copy(days=it.toInt())},valueRange=1f..7f,steps=5)
         Text("Session length · ${p.minutes} minutes")
         Slider(value=p.minutes.toFloat(),onValueChange={p=p.copy(minutes=it.toInt())},valueRange=10f..90f,steps=15)
+        SmallLabel("WEIGHT UNIT & INCREMENT STEP")
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { listOf("lb","kg").forEach { unit -> FilterChip(selected=p.unit==unit,onClick={p=p.copy(unit=unit)},label={Text(unit)}) } }
+        FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+            listOf(1.0,2.5,5.0,10.0).forEach { step ->
+                FilterChip(selected=p.weightStep==step,onClick={p=p.copy(weightStep=step)},label={Text("${decimal(step)} ${p.unit} step")})
+            }
+        }
     }
     OutlinedTextField(value=p.restrictions,onValueChange={p=p.copy(restrictions=it.take(1000))},label={Text("Limitations or preferences (optional)")},modifier=Modifier.fillMaxWidth())
     Text("Use the exclusions below to prevent exercises from appearing. Notes are shared with your selected AI provider when you ask for coaching; they are not a medical assessment.")

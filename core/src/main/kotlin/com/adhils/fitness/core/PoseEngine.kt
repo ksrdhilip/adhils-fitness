@@ -3,12 +3,16 @@ import kotlin.math.*
 
 data class Joint(val x: Float, val y: Float, val visibility: Float = 1f)
 data class PoseFrame(val timeMs: Long, val joints: List<Joint>, val aspectRatio: Float = 1f)
-data class PoseObservation(val reps: Int = 0, val holdSeconds: Int = 0, val tracking: Boolean = false,
+data class PoseObservation(
+    val reps: Int = 0, val holdSeconds: Int = 0, val tracking: Boolean = false,
     val status: String = "Position your whole body in view", val cue: String? = null,
-    val joints: List<Joint> = emptyList(), val phase: String = "Ready")
+    val joints: List<Joint> = emptyList(), val phase: String = "Ready",
+    val formScore: Int = 100, val nextRepFeedback: String? = null,
+    val primaryAngle: Int = 180, val hipAlignmentAngle: Int = 180,
+    val symmetryDelta: Int = 0, val lastRepDurationMs: Long = 0
+)
 
-/** Experimental 2D estimates. No spine, injury, or load-safety inference.
- * Movement cues are OFF by default until device/real-motion validation. */
+/** Experimental 2D estimates. No spine, injury, or load-safety inference. */
 class PoseEngine(private val exercise: String, private val movementCues: Boolean = false) {
     private var filtered: List<Joint> = emptyList()
     private var previousTime = -1L
@@ -25,6 +29,12 @@ class PoseEngine(private val exercise: String, private val movementCues: Boolean
     private var pendingCue: String? = null
     private var pendingSince = 0L
     private var tempoCueUntil = 0L
+    private var minAngleInRep = 180
+    private var minHipAngleInRep = 180
+    private var maxSymmetryInRep = 0
+    private var lastRepMs = 0L
+    private var lastRepFeedback: String? = null
+    private var lastFormScore = 100
     private var latest = PoseObservation()
     fun pause(): PoseObservation {
         armed=false; turned=false; stableSince=-1; previousTime=-1; filtered=emptyList(); candidate=""; pendingCue=null
@@ -41,7 +51,8 @@ class PoseEngine(private val exercise: String, private val movementCues: Boolean
         fun missing(reason:String):PoseObservation {
             armed=false; turned=false; stableSince=-1; candidate=""; filtered=emptyList(); pendingCue=null
             tempoCueUntil=0
-            latest=PoseObservation(count,(holdMs/1000).toInt(),false,reason,phase="Paused")
+            latest=PoseObservation(count,(holdMs/1000).toInt(),false,reason,phase="Paused",
+                formScore=lastFormScore,nextRepFeedback=lastRepFeedback)
             return latest
         }
         val points=frame.joints
@@ -70,21 +81,43 @@ class PoseEngine(private val exercise: String, private val movementCues: Boolean
             return missing("Use the floor position shown in the guide")
         if(stableSince<0) stableSince=t
         if(t-stableSince<600) {
-            latest=PoseObservation(count,(holdMs/1000).toInt(),false,"Hold position while tracking settles",joints=p)
+            latest=PoseObservation(count,(holdMs/1000).toInt(),false,"Hold position while tracking settles",joints=p,
+                formScore=lastFormScore,nextRepFeedback=lastRepFeedback)
             return latest
         }
         fun jointAngle(a:Int,b:Int,c:Int)=angle(p[a],p[b],p[c],frame.aspectRatio)
+        val hipAlign=jointAngle(shoulder,hip,ankle).roundToInt()
+        val symDelta=if(exercise in setOf("press","pushup","pull")) {
+            abs(jointAngle(12,14,16)-jointAngle(11,13,15)).roundToInt()
+        } else {
+            abs(jointAngle(24,26,28)-jointAngle(23,25,27)).roundToInt()
+        }
         var cue:String?=null
         val phase:String
+        val currentPrimaryAngle:Int
         if(exercise=="plank") {
+            currentPrimaryAngle=hipAlign
             if(dt in 1..250 && lastGood==t-dt) holdMs+=dt
-            if(jointAngle(shoulder,hip,ankle)<155) cue="Check your hip position"
+            if(hipAlign<155) {
+                cue="Check your hip position"
+                lastFormScore=75
+                lastRepFeedback="Hips at ${hipAlign}° — brace abs and glutes to straighten your body line."
+            } else {
+                lastFormScore=96
+                lastRepFeedback="Strong plank alignment (${hipAlign}°) — breathe steadily."
+            }
             phase="Holding"
         } else {
             val a=when(exercise) {
                 "squat" -> jointAngle(hip,knee,ankle)
                 "rdl" -> jointAngle(shoulder,hip,knee)
                 else -> jointAngle(shoulder,elbow,wrist)
+            }
+            currentPrimaryAngle=a.roundToInt()
+            if(armed) {
+                minAngleInRep=min(minAngleInRep,currentPrimaryAngle)
+                minHipAngleInRep=min(minHipAngleInRep,hipAlign)
+                maxSymmetryInRep=max(maxSymmetryInRep,symDelta)
             }
             val top=if(exercise=="press") a>150 && p[wrist].y<p[shoulder].y else a>155
             val bottom=a<when(exercise) { "squat","rdl" -> 115; "press" -> 105; else -> 100 }
@@ -94,10 +127,31 @@ class PoseEngine(private val exercise: String, private val movementCues: Boolean
             val start=if(exercise=="press") "Bottom" else "Top"
             val turn=if(exercise=="press") "Top" else "Bottom"
             if(sustained && current==start) {
-                if(!armed) { armed=true; cycleStart=t }
-                else if(turned) {
-                    if(t-cycleStart in 700..30000) count++
+                if(!armed) {
+                    armed=true; cycleStart=t
+                    minAngleInRep=currentPrimaryAngle; minHipAngleInRep=hipAlign; maxSymmetryInRep=symDelta
+                } else if(turned) {
+                    val repDur=t-cycleStart
+                    if(repDur in 700..30000) {
+                        count++
+                        lastRepMs=repDur
+                        var penalty=0
+                        if(repDur<1300) penalty+=12
+                        if(maxSymmetryInRep>22) penalty+=10
+                        if(exercise=="pushup" && minHipAngleInRep<155) penalty+=15
+                        if(exercise in setOf("squat","rdl") && minAngleInRep>105) penalty+=10
+                        lastFormScore=(100-penalty).coerceIn(60,100)
+                        lastRepFeedback=when {
+                            exercise=="pushup" && minHipAngleInRep<155 -> "Rep $count: Hips sagged (${minHipAngleInRep}°). Brace core to keep body straight on Rep ${count+1}."
+                            exercise=="press" && maxSymmetryInRep>24 -> "Rep $count: Arms uneven by ${maxSymmetryInRep}°. Press both sides evenly on Rep ${count+1}."
+                            repDur<1300 && exercise!="press" -> "Rep $count: Lowered too fast (${"%.1f".format(java.util.Locale.US,repDur/1000.0)}s). Slow the descent on Rep ${count+1}."
+                            exercise=="squat" && minAngleInRep>104 -> "Rep $count: Bottom angle ${minAngleInRep}°. Sit slightly deeper on Rep ${count+1}."
+                            exercise=="rdl" && minAngleInRep>106 -> "Rep $count: Hinge hips slightly further back while keeping spine neutral on Rep ${count+1}."
+                            else -> "Rep $count: Great posture (${lastFormScore}% form, ${minAngleInRep}° depth)! Keep that control on Rep ${count+1}."
+                        }
+                    }
                     turned=false; cycleStart=t
+                    minAngleInRep=currentPrimaryAngle; minHipAngleInRep=hipAlign; maxSymmetryInRep=symDelta
                 }
             }
             if(sustained && armed && current==turn && !turned) {
@@ -106,15 +160,21 @@ class PoseEngine(private val exercise: String, private val movementCues: Boolean
             }
             if(armed && t-cycleStart>30000) { armed=false; turned=false }
             phase=current
-            if(exercise=="pushup" && jointAngle(shoulder,hip,ankle)<150) cue="Check your hip position"
-            if(exercise=="press" && abs(jointAngle(12,14,16)-jointAngle(11,13,15))>28)
+            if(exercise=="pushup" && hipAlign<150) cue="Check your hip position"
+            if(exercise=="press" && symDelta>28)
                 cue="Check whether both arms move together"
         }
         lastGood=t
         if(cue==null && t<tempoCueUntil) cue="Slow the lowering phase"
         if(cue!=pendingCue) { pendingCue=cue; pendingSince=t }
         val spoken=if(movementCues && cue!=null && t-pendingSince>=650 && t-lastCue>5000) { lastCue=t; cue } else null
-        latest=PoseObservation(count,(holdMs/1000).toInt(),true,"Tracking · $phase",spoken,p,phase)
+        latest=PoseObservation(
+            reps=count, holdSeconds=(holdMs/1000).toInt(), tracking=true,
+            status="Tracking · $phase", cue=spoken, joints=p, phase=phase,
+            formScore=lastFormScore, nextRepFeedback=lastRepFeedback,
+            primaryAngle=currentPrimaryAngle, hipAlignmentAngle=hipAlign,
+            symmetryDelta=symDelta, lastRepDurationMs=lastRepMs
+        )
         return latest
     }
     companion object {

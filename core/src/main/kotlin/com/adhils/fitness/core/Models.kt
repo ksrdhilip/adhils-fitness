@@ -12,25 +12,38 @@ fun newId(): String = UUID.randomUUID().toString()
     val experience: String = "Beginner", val equipment: Set<String> = setOf("Dumbbells", "Bodyweight"),
     val days: Int = 3, val minutes: Int = 40, val unit: String = "lb",
     val excluded: Set<String> = emptySet(), val restrictions: String = "",
-    val voice: Boolean = true, val experimentalCues: Boolean = false,
+    val voice: Boolean = true, val experimentalCues: Boolean = true,
     val theme: String = "Dark", val onboardingComplete: Boolean = false,
-    val bodyWeight: Double? = null
+    val bodyWeight: Double? = null, val gymPreset: String = "Home Gym",
+    val weightStep: Double = 2.5
 )
 @Serializable data class Exercise(
     val id: String, val name: String, val pattern: String, val equipment: String,
     val muscles: String, val instructions: List<String>, val breathing: String,
     val camera: String? = null, val view: String = "Side", val timed: Boolean = false,
     val perHand: Boolean = false
-)
+) {
+    val effectiveCamera: String get() = camera ?: when (pattern) {
+        "Squat" -> "squat"
+        "Hinge" -> "rdl"
+        "Push" -> if (equipment == "Bodyweight" && "pushup" in id) "pushup" else "press"
+        "Pull" -> "pull"
+        "Carry" -> "plank"
+        "Core" -> if (timed) "plank" else "pushup"
+        else -> "squat"
+    }
+}
 @Serializable data class PlannedExercise(
     val exerciseId: String, val sets: Int = 3, val minReps: Int = 8, val maxReps: Int = 12,
-    val weightKg: Double = 0.0, val seconds: Int = 45, val restSeconds: Int = 45
+    val weightKg: Double = 0.0, val seconds: Int = 45, val restSeconds: Int = 45,
+    val supersetGroup: String? = null
 )
 @Serializable data class SetResult(
     val id: String = newId(), val exerciseId: String, val setIndex: Int,
     val reps: Int = 0, val weightKg: Double = 0.0, val seconds: Int = 0,
     val rpe: Int? = null, val warmup: Boolean = false, val notes: String = "",
-    val savedAt: Long = System.currentTimeMillis(), val observations: List<String> = emptyList()
+    val savedAt: Long = System.currentTimeMillis(), val observations: List<String> = emptyList(),
+    val setType: String = "Working"
 )
 @Serializable data class Session(
     val id: String = newId(), val title: String = "Full Body A",

@@ -24,9 +24,11 @@ import java.io.ByteArrayOutputStream
     val suggestion by vm.proposal.collectAsState()
     var message by remember { mutableStateOf("") }
     var feeling by remember { mutableStateOf("Good") }
-    var focus by remember { mutableStateOf("Full Body") }
+    var focus by remember { mutableStateOf("Fresh Muscle Groups") }
+    var targetMuscles by remember { mutableStateOf(emptySet<String>()) }
     var minutes by remember { mutableIntStateOf(state.profile.minutes) }
     var showBuilder by remember { mutableStateOf(true) }
+    val freshest=remember(state) { Recovery.freshestMuscles(state,4) }
     val week=state.sessions.filter {it.finishedAt!=null && it.finishedAt!!>=System.currentTimeMillis()-7*86400000L}
     SectionTitle("Your coach", "Advice & workout builder for ${state.profile.name} · ${state.profile.goal}")
     PanelCard {
@@ -43,8 +45,15 @@ import java.io.ByteArrayOutputStream
             }
             SmallLabel("WHAT IS YOUR FOCUS TODAY?")
             FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-                listOf("Full Body","Upper Body","Lower Body","Push","Pull","Core & Mobility").forEach { item ->
+                listOf("Fresh Muscle Groups","Full Body","Upper Body","Lower Body","Push","Pull","Core & Mobility").forEach { item ->
                     FilterChip(selected=focus==item,onClick={focus=item},label={Text(item)})
+                }
+            }
+            SmallLabel("TARGET SPECIFIC MUSCLES (OPTIONAL MULTI-SELECT)")
+            FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                Recovery.ALL_MUSCLES.forEach { m ->
+                    val sel=m in targetMuscles
+                    FilterChip(selected=sel,onClick={targetMuscles=if(sel) targetMuscles-m else targetMuscles+m},label={Text(m)})
                 }
             }
             SmallLabel("TIME AVAILABLE")
@@ -54,7 +63,10 @@ import java.io.ByteArrayOutputStream
                 }
             }
             PrimaryButton(if(busy) "Coach is building your workout…" else "Update today’s workout exercises",!busy) {
-                val prompt="I am feeling $feeling today. My focus today is $focus and I have $minutes minutes available. Please propose an updated workout exercise list for today using the available catalog exercises (with replacePlan: true) tailored to my feeling, focus, and equipment."
+                val targetNote=if(targetMuscles.isNotEmpty()) " Specifically target these muscles: ${targetMuscles.joinToString(", ")}."
+                    else if(focus=="Fresh Muscle Groups") " My freshest recovered muscles today are: ${freshest.joinToString(", ")}."
+                    else ""
+                val prompt="I am feeling $feeling today. My focus today is $focus and I have $minutes minutes available.$targetNote Please propose an updated workout exercise list for today using the available catalog exercises (with replacePlan: true) tailored to my feeling, focus, and equipment."
                 vm.ask(prompt,false)
             }
         }
