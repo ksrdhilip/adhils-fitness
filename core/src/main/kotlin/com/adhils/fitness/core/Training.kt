@@ -1,6 +1,9 @@
 package com.adhils.fitness.core
 
-data class CheckIn(val energy: Int = 3, val soreness: Int = 0, val minutes: Int = 40)
+data class CheckIn(
+    val energy: Int = 3, val soreness: Int = 0, val minutes: Int = 40,
+    val feeling: String = "Good", val focus: String = "Full Body"
+)
 data class Progression(val weightKg: Double, val reason: String)
 object Training {
     fun nextLoad(id: String, state: AppState): Progression {
@@ -26,30 +29,59 @@ object Training {
         val p = state.profile
         val completed = state.sessions.count { it.finishedAt != null }
         val variant = completed % 4
-        val ids = when (variant) {
-            0 -> listOf("goblet-squat", "rdl", "press", "row", "plank", "lateral-raise")
-            1 -> listOf("reverse-lunge", "bridge", "floor-press", "curl", "dead-bug", "tricep-extension")
-            2 -> listOf("sumo-squat", "single-leg-rdl", "arnold-press", "hammer-curl", "side-plank", "calf-raise")
-            else -> listOf("bulgarian-split-squat", "hip-thrust", "bench-press", "chest-supported-row", "bird-dog", "front-raise")
-        }
         val desired = when { check.minutes < 25 -> 3; check.minutes < 35 -> 4; check.minutes < 50 -> 5; else -> 6 }
-        val chosen = ids.mapNotNull { id ->
-            val e = Catalog.get(id)
-            if (e.id !in p.excluded && (e.equipment == "Bodyweight" || e.equipment in p.equipment)) e
-            else Catalog.exercises.firstOrNull { it.pattern == e.pattern && it.id !in p.excluded &&
-                (it.equipment == "Bodyweight" || it.equipment in p.equipment) }
-        }.distinctBy { it.id }.take(desired)
+        val compatible = Catalog.exercises.filter {
+            it.id !in p.excluded && (it.equipment == "Bodyweight" || it.equipment in p.equipment) &&
+                it.pattern !in setOf("Warm-up", "Mobility")
+        }
+        val focusKey = check.focus.substringBefore(" (").trim()
+        val chosen = if (focusKey == "Full Body" || focusKey.isEmpty()) {
+            val ids = when (variant) {
+                0 -> listOf("goblet-squat", "rdl", "press", "row", "plank", "lateral-raise")
+                1 -> listOf("reverse-lunge", "bridge", "floor-press", "curl", "dead-bug", "tricep-extension")
+                2 -> listOf("sumo-squat", "single-leg-rdl", "arnold-press", "hammer-curl", "side-plank", "calf-raise")
+                else -> listOf("bulgarian-split-squat", "hip-thrust", "bench-press", "chest-supported-row", "bird-dog", "front-raise")
+            }
+            ids.mapNotNull { id ->
+                val e = Catalog.get(id)
+                if (e.id !in p.excluded && (e.equipment == "Bodyweight" || e.equipment in p.equipment)) e
+                else compatible.firstOrNull { it.pattern == e.pattern }
+            }.distinctBy { it.id }.take(desired)
+        } else {
+            val primaryPatterns = when (focusKey) {
+                "Upper Body" -> listOf("Push", "Pull", "Carry", "Core")
+                "Lower Body" -> listOf("Squat", "Hinge", "Carry", "Core")
+                "Push" -> listOf("Push", "Core")
+                "Pull" -> listOf("Pull", "Hinge", "Core")
+                "Core & Mobility" -> listOf("Core", "Carry")
+                else -> listOf("Squat", "Hinge", "Push", "Pull", "Core")
+            }
+            val pool = if (focusKey == "Core & Mobility") {
+                Catalog.exercises.filter {
+                    it.id !in p.excluded && (it.equipment == "Bodyweight" || it.equipment in p.equipment) &&
+                        it.pattern in setOf("Core", "Mobility", "Carry") && it.id !in setOf("march", "cat-cow")
+                }
+            } else compatible.filter { it.pattern in primaryPatterns }
+            val rotated = if (pool.isNotEmpty()) pool.drop((variant * 2) % pool.size) + pool.take((variant * 2) % pool.size) else compatible
+            rotated.distinctBy { it.id }.take(desired)
+        }
         require(chosen.isNotEmpty()) { "No compatible exercises. Update equipment or restrictions." }
-        val easy = check.energy <= 2 || check.soreness == 2
-        val sets = if (easy || check.minutes < 30 || p.experience == "Beginner") 2 else 3
+        val easy = check.energy <= 2 || check.soreness == 2 || check.feeling in setOf("Tired", "Sore / Stiff", "Recovering")
+        val energized = check.feeling == "Energized" && check.energy >= 4 && check.soreness == 0
+        val sets = when {
+            easy || check.minutes < 30 || p.experience == "Beginner" -> 2
+            energized && check.minutes >= 45 -> 4
+            else -> 3
+        }
         val repRange = when (p.goal) { "Get stronger" -> 5..8; "General fitness" -> 10..15; else -> 8..12 }
-        val warmup = if ("march" !in p.excluded) listOf(PlannedExercise("march", 1, seconds = 120)) else emptyList()
-        val coolDown = if ("cat-cow" !in p.excluded) listOf(PlannedExercise("cat-cow", 1, seconds = 60)) else emptyList()
+        val warmup = if ("march" !in p.excluded) listOf(PlannedExercise("march", 1, seconds = 120, restSeconds = 45)) else emptyList()
+        val coolDown = if ("cat-cow" !in p.excluded) listOf(PlannedExercise("cat-cow", 1, seconds = 60, restSeconds = 45)) else emptyList()
         val label = listOf("A", "B", "C", "D")[variant]
-        return Session(title = "Full Body $label${if (easy) " · Light" else ""}",
+        val baseTitle = if (focusKey.isBlank()) "Full Body $label" else "$focusKey $label"
+        return Session(title = "$baseTitle${if (easy) " · Light" else if (energized) " · Strong" else ""}",
             plan = warmup + chosen.map {
                 PlannedExercise(it.id, sets = if (it.timed) 2 else sets, minReps = repRange.first, maxReps = repRange.last,
-                    weightKg = nextLoad(it.id, state).weightKg * if (easy) 0.8 else 1.0)
+                    weightKg = nextLoad(it.id, state).weightKg * if (easy) 0.8 else 1.0, seconds = 45, restSeconds = 45)
             } + coolDown)
     }
     fun saveSet(session: Session, result: SetResult): Session {
@@ -61,14 +93,36 @@ object Training {
         val value = result.copy(id = existing?.id ?: result.id)
         return session.copy(results = session.results.filterNot {
             it.exerciseId == result.exerciseId && it.setIndex == result.setIndex
-        } + value, revision = session.revision + 1, restUntil = System.currentTimeMillis() + 90_000)
+        } + value, revision = session.revision + 1, restUntil = System.currentTimeMillis() + plan.restSeconds * 1000L)
+    }
+    fun adjustTimers(session: Session, exerciseId: String, exerciseDelta: Int = 0, restDelta: Int = 0): Session {
+        require(session.finishedAt == null)
+        return session.copy(plan = session.plan.map {
+            if (it.exerciseId == exerciseId) it.copy(
+                seconds = (it.seconds + exerciseDelta).coerceIn(5, 3600),
+                restSeconds = (it.restSeconds + restDelta).coerceIn(5, 600)
+            ) else it
+        }, revision = session.revision + 1)
     }
     fun replace(session: Session, oldId: String, newId: String, profile: Profile): Session {
         require(session.finishedAt == null)
         require(session.results.none { it.exerciseId == oldId }) { "Completed sets cannot be replaced." }
         require(newId !in session.plan.map { it.exerciseId }) { "Exercise already in workout" }
-        require(Catalog.alternatives(oldId, profile).any { it.id == newId }) { "Not a compatible replacement" }
+        require(Catalog.byId.containsKey(newId) && newId !in profile.excluded) { "Not a compatible replacement" }
         return session.copy(plan = session.plan.map { if (it.exerciseId == oldId) it.copy(exerciseId = newId, weightKg = 0.0) else it },
             revision = session.revision + 1)
+    }
+    fun addExercise(session: Session, newId: String, state: AppState): Session {
+        require(session.finishedAt == null && session.plan.size < 30)
+        require(Catalog.byId.containsKey(newId) && newId !in session.plan.map { it.exerciseId }) { "Exercise is already in this workout" }
+        val e = Catalog.get(newId)
+        val added = PlannedExercise(newId, sets = if (e.timed) 2 else 3, weightKg = nextLoad(newId, state).weightKg, seconds = 45, restSeconds = 45)
+        return session.copy(plan = session.plan + added, revision = session.revision + 1)
+    }
+    fun removeExercise(session: Session, exerciseId: String): Session {
+        require(session.finishedAt == null && session.plan.size > 1) { "Workout must keep at least one exercise." }
+        require(session.results.none { it.exerciseId == exerciseId }) { "Completed sets cannot be removed." }
+        val updated = session.plan.filterNot { it.exerciseId == exerciseId }
+        return session.copy(plan = updated, currentExercise = session.currentExercise.coerceIn(updated.indices), revision = session.revision + 1)
     }
 }

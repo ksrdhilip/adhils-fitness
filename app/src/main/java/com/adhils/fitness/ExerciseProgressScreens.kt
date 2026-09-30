@@ -1,41 +1,190 @@
 package com.adhils.fitness
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.MediaController
 import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.OndemandVideo
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.adhils.fitness.core.*
+import java.net.URLEncoder
 import java.time.Instant
 import java.time.ZoneId
 
+fun youtubePostureUrl(e: Exercise, savedUri: String?): String {
+    if (!savedUri.isNullOrBlank() && (savedUri.startsWith("https://") || savedUri.startsWith("http://"))) {
+        return savedUri
+    }
+    val q = URLEncoder.encode("${e.name} exercise proper form posture tutorial short", "UTF-8")
+    return "https://m.youtube.com/results?search_query=$q"
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable fun ExercisePostureMediaCard(e: Exercise, state: AppState, vm: FitnessViewModel) {
+    val context = LocalContext.current
+    val originProfile = remember { vm.store.value.selectedId }
+    val savedUri = state.videos[e.id]
+    val isLocalVideo = savedUri != null && (savedUri.startsWith("content://") || savedUri.startsWith("file://"))
+    var playYouTube by remember(e.id) { mutableStateOf(false) }
+    var currentWebUrl by remember(e.id, savedUri) { mutableStateOf(youtubePostureUrl(e, savedUri)) }
+    var showUrlDialog by remember(e.id) { mutableStateOf(false) }
+    var customUrlInput by remember(e.id, savedUri) {
+        mutableStateOf(if (savedUri != null && savedUri.startsWith("http")) savedUri else "")
+    }
+    val chooseVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                vm.video(e.id, uri.toString(), originProfile)
+                playYouTube = false
+            }.onFailure { vm.error.value = "Could not retain access to that video. Try a file stored on this device." }
+        }
+    }
+    PanelCard {
+        if (playYouTube) {
+            Box(Modifier.fillMaxWidth().height(280.dp).clip(RoundedCornerShape(14.dp))) {
+                AndroidView(
+                    factory = { ctx ->
+                        WebView(ctx).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            settings.mediaPlaybackRequiresUserGesture = false
+                            settings.loadWithOverviewMode = true
+                            settings.useWideViewPort = true
+                            webChromeClient = WebChromeClient()
+                            webViewClient = object : WebViewClient() {
+                                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                    val url = request?.url?.toString() ?: return false
+                                    if (url.startsWith("http://") || url.startsWith("https://")) {
+                                        currentWebUrl = url
+                                        return false
+                                    }
+                                    return true
+                                }
+                                override fun onPageFinished(view: WebView?, url: String?) {
+                                    if (!url.isNullOrBlank()) currentWebUrl = url
+                                }
+                            }
+                            loadUrl(youtubePostureUrl(e, savedUri))
+                        }
+                    },
+                    onRelease = { it.destroy() },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { playYouTube = false }, modifier = Modifier.weight(1f)) { Text("Show illustration") }
+                OutlinedButton(
+                    onClick = {
+                        if (currentWebUrl.contains("watch") || currentWebUrl.contains("shorts") || currentWebUrl.contains("youtu.be")) {
+                            vm.video(e.id, currentWebUrl, originProfile)
+                        } else {
+                            showUrlDialog = true
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(if (currentWebUrl.contains("watch") || currentWebUrl.contains("shorts")) "Pin this video" else "Set YouTube link")
+                }
+            }
+        } else if (isLocalVideo && savedUri != null) {
+            AndroidView(factory = { ctx ->
+                VideoView(ctx).apply {
+                    setVideoURI(Uri.parse(savedUri))
+                    setMediaController(MediaController(ctx))
+                    setOnPreparedListener { seekTo(1) }
+                    setOnErrorListener { _, _, _ -> vm.error.value = "This personal video is no longer available. Attach it again."; true }
+                }
+            }, modifier = Modifier.fillMaxWidth().height(220.dp))
+        } else {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                PlacementDrawing(e)
+                FilledTonalButton(
+                    onClick = { playYouTube = true },
+                    shape = RoundedCornerShape(24.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = "Play posture video")
+                    Spacer(Modifier.width(8.dp))
+                    Text("Play YouTube Posture Video")
+                }
+            }
+            SmallLabel("Tap Play to load YouTube posture videos right here · ${e.view.lowercase()} view for camera tracking")
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            TextButton(onClick = {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(youtubePostureUrl(e, savedUri)))
+                runCatching { context.startActivity(intent) }
+            }) {
+                Icon(Icons.Default.OndemandVideo, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Open in YouTube")
+            }
+            TextButton(onClick = { showUrlDialog = true }) { Text("YouTube URL") }
+            TextButton(onClick = { chooseVideo.launch(arrayOf("video/*")) }) {
+                Text(if (isLocalVideo) "Replace file" else "Local video")
+            }
+        }
+    }
+    if (showUrlDialog) {
+        AlertDialog(
+            onDismissRequest = { showUrlDialog = false },
+            title = { Text("YouTube posture link for ${e.name}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Paste a YouTube video or Short link to open directly when you tap Play, or leave blank to search YouTube automatically.")
+                    OutlinedTextField(
+                        value = customUrlInput,
+                        onValueChange = { customUrlInput = it.take(500) },
+                        label = { Text("https://www.youtube.com/watch?v=...") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val trimmed = customUrlInput.trim()
+                    if (trimmed.startsWith("https://") || trimmed.startsWith("http://")) {
+                        vm.video(e.id, trimmed, originProfile)
+                    } else if (trimmed.isEmpty()) {
+                        vm.edit(originProfile) { it.copy(videos = it.videos - e.id) }
+                    }
+                    showUrlDialog = false
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { showUrlDialog = false }) { Text("Cancel") } }
+        )
+    }
+}
+
 @Composable fun ExerciseScreen(id:String,state:AppState,vm:FitnessViewModel,onBack:()->Unit) {
-    val e=Catalog.get(id);val context=LocalContext.current
-    val originProfile=remember {vm.store.value.selectedId}
-    val chooseVideo=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri->if(uri!=null) {
-        runCatching {context.contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);vm.video(id,uri.toString(),originProfile)}
-            .onFailure {vm.error.value="Could not retain access to that video. Try a file stored on this device."}
-    }}
+    val e=Catalog.get(id)
     ScreenHeader(e.name,onBack)
-    val video=state.videos[id]
-    if(video!=null) AndroidView(factory={ctx->VideoView(ctx).apply {
-        setVideoURI(Uri.parse(video));setMediaController(MediaController(ctx));setOnPreparedListener {seekTo(1)}
-        setOnErrorListener {_,_,_->vm.error.value="This personal video is no longer available. Attach it again.";true}
-    }},modifier=Modifier.fillMaxWidth().height(220.dp))
-    else PanelCard {PlacementDrawing(e);SmallLabel("Placement illustration · ${e.view.lowercase()} view for camera-supported exercises")}
-    TextButton(onClick={chooseVideo.launch(arrayOf("video/*"))}) {Text(if(video==null) "Attach your own demonstration video" else "Replace personal video")}
+    ExercisePostureMediaCard(e, state, vm)
     SmallLabel("${e.equipment} · ${e.muscles}")
     SectionTitle("How to perform")
     e.instructions.forEachIndexed {i,text->Text("${i+1}. $text")}

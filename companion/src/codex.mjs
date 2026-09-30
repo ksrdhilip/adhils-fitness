@@ -1,8 +1,24 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { mkdirSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { check, instructions, replySchema } from './contracts.mjs';
+
+function isFile(p) {
+  try { return statSync(p).isFile(); } catch { return false; }
+}
+
+export function resolveCodexExecutable(explicit, root) {
+  if(explicit) return explicit;
+  if(root) {
+    const nativeArmMac=join(root,'..','.tools','codex','node_modules','@openai','codex-darwin-arm64','vendor','aarch64-apple-darwin','bin','codex');
+    if(process.platform==='darwin' && process.arch==='arm64' && isFile(nativeArmMac)) return nativeArmMac;
+    const localBin=join(root,'..','.tools','codex','node_modules','.bin',process.platform==='win32'?'codex.cmd':'codex');
+    if(isFile(localBin)) return localBin;
+  }
+  return process.platform==='win32'?'codex.exe':'codex';
+}
 
 // Only OS/runtime variables are inherited. No workspace tokens, API keys or app connector pipes.
 export function childEnvironment(root) {
@@ -17,7 +33,7 @@ export function childEnvironment(root) {
   return env;
 }
 export class CodexClient {
-  constructor(root,executable=process.platform==='win32'?'codex.exe':'codex') {
+  constructor(root,executable=resolveCodexExecutable(undefined,root)) {
     this.root=root;this.executable=executable;this.next=1;this.pending=new Map();this.listeners=new Set();
   }
   async start() {
@@ -27,7 +43,11 @@ export class CodexClient {
   }
   async initialize() {
     const cwd=join(this.root,'.state','coach-workspace');mkdirSync(cwd,{recursive:true});
-    mkdirSync(join(this.root,'.state','codex-home'),{recursive:true});
+    const codexHome=join(this.root,'.state','codex-home');mkdirSync(codexHome,{recursive:true});
+    const targetAuth=join(codexHome,'auth.json');const defaultAuth=join(homedir(),'.codex','auth.json');
+    if(!isFile(targetAuth) && isFile(defaultAuth)) {
+      try {copyFileSync(defaultAuth,targetAuth);chmodSync(targetAuth,0o600);} catch {}
+    }
     const args=['app-server','--stdio','-c','sandbox_mode="read-only"','-c','approval_policy="never"',
       '-c','web_search="disabled"','-c','features.shell_tool=false','-c','features.unified_exec=false',
       '-c','features.apply_patch_freeform=false','-c','features.apps=false','-c','features.plugins=false',
@@ -73,7 +93,7 @@ export class CodexClient {
   }
   async coach(context) {
     check(await this.account(),'Sign in with ChatGPT using the PC companion login command first.',503);
-    const started=await this.call('thread/start',{cwd:this.cwd,sandbox:'readOnly',approvalPolicy:'never',ephemeral:true,
+    const started=await this.call('thread/start',{cwd:this.cwd,sandbox:'read-only',approvalPolicy:'never',ephemeral:true,
       baseInstructions:instructions,developerInstructions:'Return only the requested fitness JSON. Never invoke a tool.',
       environments:[],dynamicTools:[],selectedCapabilityRoots:[]});
     const threadId=started.thread.id;

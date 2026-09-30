@@ -45,9 +45,13 @@ test('pair invitation expires, cannot be reused, and device tokens can be revoke
   journal.revoke(device.deviceId);assert.equal(journal.authenticate(device.token),null);
   const next=journal.invite();now+=300001;assert.throws(()=>journal.pair(next.secret,'tablet'),/expired/);
 });
-test('coach rejects stale proposals, removed logged sets, increases and invented exercises',()=>{
+test('coach allows catalog exercise updates and new-session proposals while rejecting stale, destructive or invented changes',()=>{
   const r=request();assert.deepEqual(validateReply(reply,r),reply);
-  for(const patch of [{revision:2},{changes:[{exerciseId:'rdl',sets:0}]},{changes:[{exerciseId:'rdl',sets:4}]},{changes:[{exerciseId:'invented',sets:1}]}])
+  const replaced={...reply,proposal:{...reply.proposal,changes:[{exerciseId:'rdl',sets:4},{exerciseId:'curl',sets:3}]}};
+  assert.deepEqual(validateReply(replaced,r),replaced);
+  const newSessionReply={explanation:'New upper body plan',proposal:{sessionId:'new',revision:0,reason:'Upper body focus',changes:[{exerciseId:'press',sets:3},{exerciseId:'row',sets:3}]}};
+  assert.deepEqual(validateReply(newSessionReply,{...r,session:null}),newSessionReply);
+  for(const patch of [{revision:2},{changes:[{exerciseId:'rdl',sets:0}]},{changes:[{exerciseId:'rdl',sets:6}]},{changes:[{exerciseId:'invented',sets:1}]}])
     assert.throws(()=>validateReply({...reply,proposal:{...reply.proposal,...patch}},r));
   assert.throws(()=>validateReply(reply,{...r,session:null}));
 });

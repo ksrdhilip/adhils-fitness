@@ -18,31 +18,73 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 
-@Composable fun CoachScreen(state:AppState,vm:FitnessViewModel) {
+@OptIn(ExperimentalLayoutApi::class)
+@Composable fun CoachScreen(state:AppState,vm:FitnessViewModel,onOpenWorkout:(()->Unit)?=null) {
     val busy by vm.busy.collectAsState()
     val suggestion by vm.proposal.collectAsState()
     var message by remember { mutableStateOf("") }
+    var feeling by remember { mutableStateOf("Good") }
+    var focus by remember { mutableStateOf("Full Body") }
+    var minutes by remember { mutableIntStateOf(state.profile.minutes) }
+    var showBuilder by remember { mutableStateOf(true) }
     val week=state.sessions.filter {it.finishedAt!=null && it.finishedAt!!>=System.currentTimeMillis()-7*86400000L}
-    SectionTitle("Your coach", "Advice for ${state.profile.name} · ${state.profile.goal}")
+    SectionTitle("Your coach", "Advice & workout builder for ${state.profile.name} · ${state.profile.goal}")
+    PanelCard {
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
+            SectionTitle("Customize today’s workout", if(state.active!=null) "Active: ${state.active!!.title}" else "No workout started yet")
+            TextButton(onClick={showBuilder=!showBuilder}) {Text(if(showBuilder) "Hide" else "Show")}
+        }
+        if(showBuilder) {
+            SmallLabel("HOW ARE YOU FEELING TODAY?")
+            FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                listOf("Energized","Good","Tired","Sore / Stiff","Recovering").forEach { item ->
+                    FilterChip(selected=feeling==item,onClick={feeling=item},label={Text(item)})
+                }
+            }
+            SmallLabel("WHAT IS YOUR FOCUS TODAY?")
+            FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                listOf("Full Body","Upper Body","Lower Body","Push","Pull","Core & Mobility").forEach { item ->
+                    FilterChip(selected=focus==item,onClick={focus=item},label={Text(item)})
+                }
+            }
+            SmallLabel("TIME AVAILABLE")
+            FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                listOf(20,30,45,60).forEach { m ->
+                    FilterChip(selected=minutes==m,onClick={minutes=m},label={Text("$m min")})
+                }
+            }
+            PrimaryButton(if(busy) "Coach is building your workout…" else "Update today’s workout exercises",!busy) {
+                val prompt="I am feeling $feeling today. My focus today is $focus and I have $minutes minutes available. Please propose an updated workout exercise list for today using the available catalog exercises (with replacePlan: true) tailored to my feeling, focus, and equipment."
+                vm.ask(prompt,false)
+            }
+        }
+    }
     PanelCard {
         SectionTitle("This week", "${week.size} workouts · ${week.sumOf {s->s.results.count {!it.warmup}}} working sets")
         Text("Your profile, restrictions and recent workouts provide the context. Camera video stays on this device.")
         OutlinedButton(onClick={vm.ask("Review my last seven days and explain what to focus on next week.",true)},enabled=!busy) {Text("Review my week")}
     }
-    if(state.chats.isEmpty()) EmptyState("Start a conversation", "Ask why an exercise is in your plan, or request a shorter workout. Connect your PC in Settings first.")
+    if(state.chats.isEmpty()) EmptyState("Start a conversation", "Use the check-in above to update today’s exercises, or ask any training question below.")
     state.chats.takeLast(30).forEach {entry->
         PanelCard { SmallLabel(if(entry.role=="you") state.profile.name else "COACH");Text(entry.text) }
     }
     suggestion?.proposal?.let {proposal->
         PanelCard {
-            SectionTitle("Review workout change",proposal.reason)
-            proposal.changes.forEach {change->Text("${Catalog.byId[change.exerciseId]?.name ?: change.exerciseId}: ${change.sets} sets")}
-            Text("Completed sets are preserved. This applies only to the workout version used by the coach.")
-            PrimaryButton("Apply to my workout",!busy) {vm.applyProposal()}
+            SectionTitle(proposal.title?.takeIf {it.isNotBlank()} ?: "Review workout update",proposal.reason)
+            proposal.changes.forEach {change->
+                val ex=Catalog.byId[change.exerciseId]
+                val detail=if(ex?.timed==true) "${change.seconds ?: 45}s hold" else "${change.minReps ?: 8}–${change.maxReps ?: 12} reps"
+                Text("• ${ex?.name ?: change.exerciseId}: ${change.sets} sets ($detail · ${change.restSeconds ?: 45}s rest)")
+            }
+            Text(if(state.active!=null) "Completed sets are preserved. Applying this updates your active workout’s exercise list." else "Applying this creates and starts today’s workout with these exercises.")
+            PrimaryButton(if(state.active!=null) "Apply to my workout" else "Start this workout",!busy) {
+                vm.applyProposal()
+                onOpenWorkout?.invoke()
+            }
             TextButton(onClick={vm.proposal.value=null}) {Text("Keep my current plan")}
         }
     }
-    OutlinedTextField(value=message,onValueChange={message=it.take(4000)},label={Text("Ask your coach")},
+    OutlinedTextField(value=message,onValueChange={message=it.take(4000)},label={Text("Ask your coach (e.g., 'Replace lunges with step-ups and add bicep curls')")},
         modifier=Modifier.fillMaxWidth(),minLines=2,maxLines=6)
     PrimaryButton(if(busy) "Waiting for your PC…" else "Send",!busy && message.isNotBlank()) {vm.ask(message);message=""}
     SmallLabel("If a movement causes pain, stop that movement. The coach does not diagnose injuries.")

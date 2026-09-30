@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { Journal } from './journal.mjs';
 import { check } from './contracts.mjs';
 import { readCredential,paidProvider } from './providers.mjs';
-import { CodexClient } from './codex.mjs';
+import { CodexClient,resolveCodexExecutable } from './codex.mjs';
 import { CoachService,fitnessServer,privateAddress } from './server.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
@@ -15,7 +15,7 @@ const state=join(root,'.state');mkdirSync(state,{recursive:true});
 const args=process.argv.slice(2),command=args[0]??'help';
 const option=name=>{const i=args.indexOf(name);return i>=0?args[i+1]:undefined;};
 const escape=s=>s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
-const codex=new CodexClient(root,option('--codex')??(process.platform==='win32'?'codex.exe':'codex'));
+const codex=new CodexClient(root,resolveCodexExecutable(option('--codex'),root));
 
 function resolveOpenSSL(explicit) {
   if(explicit) return explicit;

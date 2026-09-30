@@ -69,13 +69,32 @@ import java.time.format.DateTimeFormatter
         ExerciseRow(it) { onExercise(it.exerciseId) }
     }
 }
-@Composable fun CheckInScreen(p:Profile,onStart:(CheckIn)->Unit,onBack:()->Unit) {
+@OptIn(ExperimentalLayoutApi::class)
+@Composable fun CheckInScreen(p:Profile,onStart:(CheckIn)->Unit,onBack:()->Unit,onAskCoach:((CheckIn)->Unit)?=null) {
+    var feeling by remember { mutableStateOf("Good") }
+    var focus by remember { mutableStateOf("Full Body") }
     var energy by remember { mutableFloatStateOf(3f) }
     var soreness by remember { mutableIntStateOf(0) }
     var minutes by remember { mutableFloatStateOf(p.minutes.toFloat()) }
     ScreenHeader("Your check-in",onBack)
-    SectionTitle("Make today work for you","Adjust your session before you begin.")
+    SectionTitle("Make today work for you","Tell us how you feel and your focus to customize today’s exercises.")
     PanelCard {
+        Text("How are you feeling today?",fontWeight=FontWeight.SemiBold)
+        FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+            listOf("Energized","Good","Tired","Sore / Stiff","Recovering").forEach { item ->
+                FilterChip(selected=feeling==item,onClick={
+                    feeling=item
+                    energy=when(item) {"Energized"->5f;"Good"->3f;"Tired"->2f;"Sore / Stiff"->2f;else->2f}
+                    if(item=="Sore / Stiff") soreness=2
+                },label={Text(item)})
+            }
+        }
+        Text("What is your focus today?",fontWeight=FontWeight.SemiBold)
+        FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+            listOf("Full Body","Upper Body","Lower Body","Push (Chest & Shoulders)","Pull (Back & Biceps)","Core & Mobility").forEach { item ->
+                FilterChip(selected=focus==item,onClick={focus=item},label={Text(item)})
+            }
+        }
         Text("Energy · ${energy.toInt()} of 5")
         Slider(value=energy,onValueChange={ energy=it },valueRange=1f..5f,steps=3)
         Text("Soreness")
@@ -85,9 +104,17 @@ import java.time.format.DateTimeFormatter
         Text("Time available · ${minutes.toInt()} min")
         Slider(value=minutes,onValueChange={ minutes=it },valueRange=10f..90f,steps=15)
     }
-    if(energy<=2 || soreness==2) Text("Today’s plan will use fewer sets and lighter suggested weights.")
+    if(energy<=2 || soreness==2 || feeling in setOf("Tired","Sore / Stiff","Recovering")) {
+        Text("Today’s plan will use lighter volume and recovery-friendly sets.")
+    }
     if(p.restrictions.isNotBlank()) Text("Your note: ${p.restrictions}. Excluded exercises are filtered; review the plan before lifting.")
-    PrimaryButton("Start adjusted workout") { onStart(CheckIn(energy.toInt(),soreness,minutes.toInt())) }
+    val check=CheckIn(energy.toInt(),soreness,minutes.toInt(),feeling,focus)
+    PrimaryButton("Start ${focus.substringBefore(" (")} workout") { onStart(check) }
+    if(onAskCoach!=null) {
+        OutlinedButton(onClick={ onAskCoach(check) },modifier=Modifier.fillMaxWidth()) {
+            Text("Ask AI Coach to customize today’s exercises")
+        }
+    }
 }
 @Composable fun LibraryScreen(state:AppState,onExercise:(String)->Unit,onRoutine:(SavedRoutine)->Unit,onSession:(String)->Unit) {
     var tab by remember { mutableIntStateOf(0) }

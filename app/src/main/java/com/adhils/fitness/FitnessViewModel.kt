@@ -46,7 +46,16 @@ class FitnessViewModel(app:Application):AndroidViewModel(app) {
     }
     fun saveSet(result:SetResult)=session { Training.saveSet(it,result) }
     fun nextExercise(index:Int)=session { it.copy(currentExercise=index.coerceIn(it.plan.indices)) }
-    fun changeRest(delta:Long)=session { it.copy(restUntil=if(delta==0L) 0 else (it.restUntil.coerceAtLeast(System.currentTimeMillis())+delta)) }
+    fun changeRest(delta:Long)=session {
+        it.copy(restUntil=if(delta==0L) 0 else (it.restUntil.coerceAtLeast(System.currentTimeMillis())+delta).coerceAtLeast(System.currentTimeMillis()))
+    }
+    fun adjustTimers(exerciseId:String,exerciseDelta:Int=0,restDelta:Int=0)=session { Training.adjustTimers(it,exerciseId,exerciseDelta,restDelta) }
+    fun addExercise(newId:String)=edit { state ->
+        val active=state.active ?: error("No active workout")
+        val updated=Training.addExercise(active,newId,state)
+        state.copy(sessions=state.sessions.map { if(it.id==active.id) updated else it })
+    }
+    fun removeExercise(exerciseId:String)=session { Training.removeExercise(it,exerciseId) }
     fun replace(oldId:String,newId:String,remember:Boolean) {
         val id=store.value.selectedId
         edit(id) { state ->
@@ -64,7 +73,7 @@ class FitnessViewModel(app:Application):AndroidViewModel(app) {
     fun clearProfileData() { dataEpoch++;proposal.value=null; edit { AppState(profile=it.profile) } }
     fun applyProposal() {
         val suggestion=proposal.value?.proposal ?: return
-        session { CoachChanges.apply(it,suggestion) }; proposal.value=null
+        edit { CoachChanges.applyToState(it,suggestion) }; proposal.value=null
     }
     fun ask(text:String,weekly:Boolean=false) {
         if(text.isBlank() || busy.value) return
@@ -74,9 +83,14 @@ class FitnessViewModel(app:Application):AndroidViewModel(app) {
         edit(origin.id) { it.copy(chats=(it.chats+ChatEntry("you",text)).takeLast(100)) }
         viewModelScope.launch {
             try {
-                val request=CoachRequest(profileId=origin.id,message=text.take(4000),profile=origin.state.profile,
+                val p=origin.state.profile
+                val catalogList=Catalog.exercises.filter {
+                    it.id !in p.excluded && (it.equipment=="Bodyweight" || it.equipment in p.equipment)
+                }.map { CatalogExerciseSummary(it.id,it.name,it.pattern,it.equipment,it.muscles,it.timed) }
+                val request=CoachRequest(profileId=origin.id,message=text.take(4000),profile=p,
                     session=origin.state.active,recentSessions=origin.state.sessions.filter { it.finishedAt!=null }.takeLast(12),
-                    provider=companion.provider,weekly=weekly,conversation=origin.state.chats.takeLast(8))
+                    provider=companion.provider,weekly=weekly,conversation=origin.state.chats.takeLast(8),
+                    availableExercises=catalogList)
                 val reply=companion.coach(request)
                 mutex.withLock {
                     if(epoch!=dataEpoch) return@withLock

@@ -82,7 +82,11 @@ class MainActivity:ComponentActivity() {
                         when {
                             route=="profile" -> ProfileScreen(state.profile,onSave={vm.saveProfile(it);route="today"},onBack=if(state.profile.onboardingComplete) ({route="settings"}) else null)
                             route=="today" -> TodayScreen(state,{route="checkin"},{route="active"},::showExercise,{route="workouts"})
-                            route=="checkin" -> CheckInScreen(state.profile,{vm.start(it);route="active"},{route="today"})
+                            route=="checkin" -> CheckInScreen(state.profile,{vm.start(it);route="active"},{route="today"}) { check ->
+                                val prompt="I am feeling ${check.feeling} today (energy ${check.energy}/5, soreness ${check.soreness}/2). My focus today is ${check.focus} and I have ${check.minutes} minutes. Please propose today's workout exercise list using the available catalog exercises (with replacePlan: true)."
+                                vm.ask(prompt,false)
+                                route="coach"
+                            }
                             route=="workouts" -> LibraryScreen(state,::showExercise,{vm.start(CheckIn(minutes=state.profile.minutes),it);route="active"},{route="summary:$it"})
                             route=="active" -> state.active?.let { s -> WorkoutScreen(state,s,vm,{leave=true},::showExercise,{route="camera"},{vm.finish();route="summary:${s.id}"}) }
                                 ?: EmptyState("Getting your workout ready","Your sets are saved as you train.")
@@ -92,7 +96,7 @@ class MainActivity:ComponentActivity() {
                             route.startsWith("exercise:") -> ExerciseScreen(route.substringAfter(":"),state,vm,::back)
                             route.startsWith("summary:") -> state.sessions.find {it.id==route.substringAfter(":")}?.let { SummaryScreen(it,state,vm,{route="today"},{route="coach"}) }
                             route=="progress" -> ProgressScreen(state,vm)
-                            route=="coach" -> CoachScreen(state,vm)
+                            route=="coach" -> CoachScreen(state,vm,{route="active"})
                             route=="settings" -> SettingsScreen(state,vm,{route="profile"},{profiles=true})
                         }
                         Spacer(Modifier.height(12.dp))

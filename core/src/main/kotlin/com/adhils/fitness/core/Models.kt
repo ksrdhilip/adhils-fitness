@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.util.UUID
 
-val AppJson = Json { ignoreUnknownKeys = false; encodeDefaults = true }
+val AppJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 fun newId(): String = UUID.randomUUID().toString()
 
 @Serializable data class Profile(
@@ -24,7 +24,7 @@ fun newId(): String = UUID.randomUUID().toString()
 )
 @Serializable data class PlannedExercise(
     val exerciseId: String, val sets: Int = 3, val minReps: Int = 8, val maxReps: Int = 12,
-    val weightKg: Double = 0.0, val seconds: Int = 30
+    val weightKg: Double = 0.0, val seconds: Int = 45, val restSeconds: Int = 45
 )
 @Serializable data class SetResult(
     val id: String = newId(), val exerciseId: String, val setIndex: Int,
@@ -68,7 +68,8 @@ fun newId(): String = UUID.randomUUID().toString()
     }
 }
 fun validPlan(p: PlannedExercise) = Catalog.byId.containsKey(p.exerciseId) && p.sets in 1..10 &&
-    p.minReps in 1..100 && p.maxReps in p.minReps..100 && p.weightKg.isFinite() && p.weightKg in 0.0..500.0 && p.seconds in 5..3600
+    p.minReps in 1..100 && p.maxReps in p.minReps..100 && p.weightKg.isFinite() && p.weightKg in 0.0..500.0 &&
+    p.seconds in 5..3600 && p.restSeconds in 5..600
 fun validSet(s: SetResult) = s.setIndex in 0..9 && s.reps in 0..100 && s.seconds in 0..3600 &&
     s.weightKg.isFinite() && s.weightKg in 0.0..500.0 && (s.rpe == null || s.rpe in 1..10) && s.notes.length <= 2000
 fun toKg(value: Double, unit: String) = if (unit == "lb") value / 2.2046226218 else value

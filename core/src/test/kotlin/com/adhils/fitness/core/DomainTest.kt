@@ -27,12 +27,18 @@ class DomainTest {
             SetResult(exerciseId="rdl",setIndex=2,reps=10,weightKg=12.5,rpe=8)))))
         assertEquals(12.5,Training.nextLoad("rdl",ramped).weightKg)
     }
-    @Test fun staleAndDestructiveAiChangesAreRejected() {
+    @Test fun staleAndDestructiveAiChangesAreRejectedWhileValidExerciseUpdatesSucceed() {
         val session=Training.saveSet(Session(plan=listOf(PlannedExercise("rdl"))),
             SetResult(exerciseId="rdl",setIndex=2,reps=10))
-        assertFails { CoachChanges.apply(session,CoachProposal(session.id,0,"shorter",listOf(PlanChange("rdl",2)))) }
-        assertFails { CoachChanges.apply(session,CoachProposal(session.id,session.revision,"shorter",listOf(PlanChange("rdl",2)))) }
-        assertFails { CoachChanges.apply(session,CoachProposal(session.id,session.revision,"more",listOf(PlanChange("rdl",4)))) }
+        assertFails { CoachChanges.apply(session,CoachProposal(session.id,0,"shorter",changes=listOf(PlanChange("rdl",2)))) }
+        assertFails { CoachChanges.apply(session,CoachProposal(session.id,session.revision,"shorter",changes=listOf(PlanChange("rdl",2)))) }
+        assertFails { CoachChanges.apply(session,CoachProposal(session.id,session.revision,"invalid",changes=listOf(PlanChange("invented",3)))) }
+        val expanded=CoachChanges.apply(session,CoachProposal(session.id,session.revision,"add exercises",changes=listOf(PlanChange("rdl",4),PlanChange("curl",3))))
+        assertEquals(listOf("rdl","curl"),expanded.plan.map { it.exerciseId })
+        assertEquals(4,expanded.plan.first().sets)
+        val adjusted=Training.adjustTimers(expanded,"curl",exerciseDelta=-5,restDelta=5)
+        assertEquals(40,adjusted.plan.last().seconds)
+        assertEquals(50,adjusted.plan.last().restSeconds)
     }
     @Test fun profileSwitchingIsolatesHistoryAndProgression() {
         val initial=ProfileStore().initialized()
