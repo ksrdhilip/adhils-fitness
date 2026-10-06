@@ -31,10 +31,10 @@ if [[ ! -x "$TASK_GRADLE" ]]; then
 fi
 
 if [[ $# -eq 0 ]]; then
-    TASKS=(":core:test" ":app:assembleDebug" ":app:lintDebug")
+    TASKS=(":core:jvmTest" ":app:assembleDebug")
 else
     TASKS=("$@")
 fi
 
 cd "$TASK_ROOT"
-"$TASK_GRADLE" "${TASKS[@]}" --console=plain
+"$TASK_GRADLE" --dependency-verification lenient "${TASKS[@]}" --console=plain

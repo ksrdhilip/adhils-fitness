@@ -14,7 +14,14 @@ import com.adhils.fitness.core.*
     var p by remember(original) { mutableStateOf(original) }
     ScreenHeader(if(original.onboardingComplete) "Edit profile" else "Make it yours",onBack)
     Text("Plans, workout history, progress, and AI suggestions belong to this profile.")
-    OutlinedTextField(value=p.name,onValueChange={p=p.copy(name=it.take(80))},label={Text("Name")},modifier=Modifier.fillMaxWidth(),singleLine=true)
+    OutlinedTextField(
+        value=p.name,
+        onValueChange={p=p.copy(name=it.take(80))},
+        label={Text("Name")},
+        placeholder={Text("Enter your name (e.g. Alex, Jordan)")},
+        modifier=Modifier.fillMaxWidth(),
+        singleLine=true
+    )
     SectionTitle("Your goal")
     FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
         listOf("Build muscle","Get stronger","General fitness","Support weight management").forEach { goal -> FilterChip(selected=p.goal==goal,onClick={p=p.copy(goal=goal)},label={Text(goal)}) }

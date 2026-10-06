@@ -31,7 +31,7 @@ object Recovery {
         return matched.distinct()
     }
 
-    fun calculate(state: AppState, nowMs: Long = System.currentTimeMillis()): List<MuscleStatus> {
+    fun calculate(state: AppState, nowMs: Long = nowMillis()): List<MuscleStatus> {
         val completed = state.sessions.filter { it.finishedAt != null }
         val sevenDaysAgo = nowMs - 7L * 24 * 3600 * 1000
         val recoveryWindowMs = 72L * 3600 * 1000 // 72 hours for full recovery
@@ -75,7 +75,7 @@ object Recovery {
         }
     }
 
-    fun freshestMuscles(state: AppState, count: Int = 4, nowMs: Long = System.currentTimeMillis()): List<String> =
+    fun freshestMuscles(state: AppState, count: Int = 4, nowMs: Long = nowMillis()): List<String> =
         calculate(state, nowMs)
             .sortedWith(compareByDescending<MuscleStatus> { it.recoveryPercent }.thenBy { it.workingSetsLast7Days })
             .take(count)

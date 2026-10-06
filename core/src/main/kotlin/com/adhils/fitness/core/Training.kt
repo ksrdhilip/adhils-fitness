@@ -35,7 +35,7 @@ object Training {
             return Progression((weight - increment).coerceAtLeast(0.0), "Two completed sessions missed the lower target. Consider a small reduction.")
         return Progression(weight, "Keep the current weight and build toward the upper rep target.")
     }
-    private fun decimalStr(v: Double) = if (v % 1.0 < 0.05) "%.0f".format(java.util.Locale.US, v) else "%.1f".format(java.util.Locale.US, v)
+    private fun decimalStr(v: Double) = formatDecimal(v)
     fun generate(state: AppState, check: CheckIn): Session {
         require(check.energy in 1..5 && check.soreness in 0..2 && check.minutes in 10..120)
         val p = state.profile
@@ -53,7 +53,7 @@ object Training {
                 val rotated = if (matching.isNotEmpty()) matching.drop((variant * 2) % matching.size) + matching.take((variant * 2) % matching.size) else compatible
                 rotated.distinctBy { it.id }.take(desired)
             }
-            focusKey == "Fresh Muscle Groups" || focusKey == "Fresh Muscles" -> {
+            focusKey in setOf("Fresh Muscle Groups", "Fresh Muscles", "Freshest Muscles", "Auto", "Auto-Balanced") -> {
                 val fresh = Recovery.freshestMuscles(state, 4).toSet()
                 val matching = compatible.filter { ex -> Recovery.extractMuscles(ex).firstOrNull() in fresh }
                 val rotated = if (matching.isNotEmpty()) matching.drop((variant * 2) % matching.size) + matching.take((variant * 2) % matching.size) else compatible
@@ -73,20 +73,33 @@ object Training {
                 }.distinctBy { it.id }.take(desired)
             }
             else -> {
-                val primaryPatterns = when (focusKey) {
-                    "Upper Body" -> listOf("Push", "Pull", "Carry", "Core")
-                    "Lower Body" -> listOf("Squat", "Hinge", "Carry", "Core")
-                    "Push" -> listOf("Push", "Core")
-                    "Pull" -> listOf("Pull", "Hinge", "Core")
-                    "Core & Mobility" -> listOf("Core", "Carry")
-                    else -> listOf("Squat", "Hinge", "Push", "Pull", "Core")
-                }
-                val pool = if (focusKey == "Core & Mobility") {
-                    Catalog.exercises.filter {
-                        it.id !in p.excluded && (it.equipment == "Bodyweight" || it.equipment in p.equipment) &&
-                            it.pattern in setOf("Core", "Mobility", "Carry") && it.id !in setOf("march", "cat-cow")
+                val pool = when {
+                    focusKey == "Core & Mobility" -> {
+                        Catalog.exercises.filter {
+                            it.id !in p.excluded && (it.equipment == "Bodyweight" || it.equipment in p.equipment) &&
+                                it.pattern in setOf("Core", "Mobility", "Carry") && it.id !in setOf("march", "cat-cow")
+                        }
                     }
-                } else compatible.filter { it.pattern in primaryPatterns }
+                    focusKey in setOf("Back", "Pull", "Back & Biceps") -> {
+                        compatible.filter { "Back" in Recovery.extractMuscles(it) || "Biceps" in Recovery.extractMuscles(it) || it.pattern == "Pull" }
+                    }
+                    focusKey in setOf("Shoulder", "Shoulders", "Shoulders & Arms") -> {
+                        compatible.filter { val m = Recovery.extractMuscles(it); "Shoulders" in m || "Biceps" in m || "Triceps" in m }
+                    }
+                    focusKey in setOf("Chest", "Push", "Chest & Shoulders") -> {
+                        compatible.filter { val m = Recovery.extractMuscles(it); "Chest" in m || "Shoulders" in m || "Triceps" in m || it.pattern == "Push" }
+                    }
+                    focusKey == "Upper Body" -> {
+                        compatible.filter { it.pattern in listOf("Push", "Pull", "Carry", "Core") }
+                    }
+                    focusKey == "Lower Body" -> {
+                        compatible.filter { it.pattern in listOf("Squat", "Hinge", "Carry", "Core") }
+                    }
+                    else -> {
+                        val primaryPatterns = listOf("Squat", "Hinge", "Push", "Pull", "Core")
+                        compatible.filter { it.pattern in primaryPatterns }
+                    }
+                }
                 val rotated = if (pool.isNotEmpty()) pool.drop((variant * 2) % pool.size) + pool.take((variant * 2) % pool.size) else compatible
                 rotated.distinctBy { it.id }.take(desired)
             }
@@ -102,12 +115,7 @@ object Training {
         val repRange = when (p.goal) { "Get stronger" -> 5..8; "General fitness" -> 10..15; else -> 8..12 }
         val warmup = if ("march" !in p.excluded) listOf(PlannedExercise("march", 1, seconds = 120, restSeconds = 45)) else emptyList()
         val coolDown = if ("cat-cow" !in p.excluded) listOf(PlannedExercise("cat-cow", 1, seconds = 60, restSeconds = 45)) else emptyList()
-        val label = listOf("A", "B", "C", "D")[variant]
-        val baseTitle = when {
-            check.targetMuscles.isNotEmpty() -> check.targetMuscles.take(2).joinToString(" & ") + " Focus"
-            focusKey.isBlank() -> "Full Body $label"
-            else -> "$focusKey $label"
-        }
+        val baseTitle = computeWorkoutTitle(chosen, focusKey, check.targetMuscles)
         val groupLabels = listOf("A", "B", "C", "D")
         val mainPlan = chosen.mapIndexed { idx, it ->
             val rawWeight = nextLoad(it.id, state).weightKg * if (easy) 0.8 else 1.0
@@ -129,7 +137,8 @@ object Training {
             it.exerciseId == result.exerciseId && it.setIndex == result.setIndex
         } + value
         // If part of a Superset, advance to the partner exercise in the superset if it has uncompleted sets for this round
-        var nextIndex = session.currentExercise
+        val thisIndex = session.plan.indexOfFirst { it.exerciseId == result.exerciseId }
+        var nextIndex = if (thisIndex >= 0) thisIndex else session.currentExercise
         var restMs = plan.restSeconds * 1000L
         if (plan.supersetGroup != null) {
             val partners = session.plan.mapIndexedNotNull { idx, p -> if (p.supersetGroup == plan.supersetGroup) idx to p else null }
@@ -147,7 +156,7 @@ object Training {
             }
         }
         return session.copy(results = updatedResults, currentExercise = nextIndex, revision = session.revision + 1,
-            restUntil = System.currentTimeMillis() + restMs)
+            restUntil = nowMillis() + restMs)
     }
     fun toggleSupersetWithNext(session: Session, index: Int): Session {
         require(session.finishedAt == null && index in 0 until session.plan.lastIndex)
@@ -215,5 +224,64 @@ object Training {
             },
             revision = session.revision + 1
         )
+    }
+
+    fun computeWorkoutTitle(chosen: List<Exercise>, focusKey: String = "", targetMuscles: Set<String> = emptySet()): String {
+        val upperMuscles = setOf("Chest", "Back", "Shoulders", "Biceps", "Triceps")
+        val lowerMuscles = setOf("Quads", "Glutes", "Hamstrings", "Calves")
+
+        // 1. If explicit target muscles chosen by user
+        if (targetMuscles.isNotEmpty()) {
+            val sortedTarget = targetMuscles.toList()
+            return when {
+                sortedTarget.size == 1 -> "${sortedTarget[0]} Focus"
+                sortedTarget.all { it in upperMuscles } -> "Upper Body (${sortedTarget.take(2).joinToString(" & ")})"
+                sortedTarget.all { it in lowerMuscles } -> "Lower Body (${sortedTarget.take(2).joinToString(" & ")})"
+                else -> "Full Body (${sortedTarget.take(2).joinToString(" & ")})"
+            }
+        }
+
+        // 2. Core & Mobility check
+        if (focusKey == "Core & Mobility" || chosen.all { it.pattern in setOf("Core", "Mobility", "Carry") || Recovery.extractMuscles(it).all { m -> m == "Core" } }) {
+            return "Core & Mobility"
+        }
+
+        // 3. Extract muscle frequencies across chosen exercises
+        val allMuscles = chosen.flatMap { Recovery.extractMuscles(it) }
+        val primaryMuscles = chosen.mapNotNull { Recovery.extractMuscles(it).firstOrNull() }
+
+        val sortedMuscles = allMuscles.groupingBy { it }.eachCount().entries
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }
+                .thenByDescending { entry -> primaryMuscles.count { it == entry.key } })
+            .map { it.key }
+
+        val upperExCount = chosen.count { ex -> Recovery.extractMuscles(ex).any { it in upperMuscles } }
+        val lowerExCount = chosen.count { ex -> Recovery.extractMuscles(ex).any { it in lowerMuscles } }
+
+        // 4. Pure or dominant lower body
+        if ((lowerExCount > 0 && upperExCount == 0) || focusKey == "Lower Body") {
+            val topLower = sortedMuscles.filter { it in lowerMuscles }.take(2)
+            return if (topLower.isNotEmpty()) "Lower Body (${topLower.joinToString(" & ")})" else "Lower Body"
+        }
+
+        // 5. Pure or dominant upper body
+        if ((upperExCount > 0 && lowerExCount == 0) || focusKey in setOf("Upper Body", "Push", "Pull", "Chest & Shoulders", "Back & Biceps", "Shoulders & Arms", "Back", "Shoulders", "Chest")) {
+            val topUpper = sortedMuscles.filter { it in upperMuscles }.take(2)
+            return when {
+                topUpper.contains("Back") && topUpper.contains("Biceps") -> "Upper Body (Back & Biceps)"
+                topUpper.contains("Chest") && (topUpper.contains("Shoulders") || topUpper.contains("Triceps")) -> "Upper Body (Chest & ${if (topUpper.contains("Shoulders")) "Shoulders" else "Triceps"})"
+                topUpper.contains("Shoulders") && (topUpper.contains("Biceps") || topUpper.contains("Triceps")) -> "Shoulders & Arms"
+                topUpper.contains("Back") && topUpper.contains("Shoulders") -> "Upper Body (Back & Shoulders)"
+                topUpper.contains("Chest") && topUpper.contains("Back") -> "Upper Body (Chest & Back)"
+                topUpper.size == 1 -> "Upper Body (${topUpper[0]})"
+                topUpper.size >= 2 -> "Upper Body (${topUpper.joinToString(" & ")})"
+                else -> "Upper Body"
+            }
+        }
+
+        // 6. Full body (mix of upper and lower)
+        val topLower = sortedMuscles.firstOrNull { it in lowerMuscles } ?: "Legs"
+        val topUpper = sortedMuscles.firstOrNull { it in upperMuscles } ?: "Upper"
+        return "Full Body ($topLower & $topUpper)"
     }
 }

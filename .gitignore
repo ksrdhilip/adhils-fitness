@@ -19,3 +19,8 @@ companion/dist/
 *.keystore
 *.fitness-backup
 test-results/
+xcuserdata/
+*.xcuserstate
+*.apk
+dist/*.apk
+dist/*.ipa

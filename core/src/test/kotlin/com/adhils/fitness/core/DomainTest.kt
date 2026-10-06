@@ -71,6 +71,17 @@ class DomainTest {
         assertFalse(output.tracking); assertEquals(0,output.reps); assertEquals(0,output.holdSeconds)
         assertFalse(engine.pause().tracking)
     }
+    @Test fun timedExerciseAccumulatesHoldSmoothly() {
+        val engine = PoseEngine("timed")
+        val joints = MutableList(33) { Joint(0.5f, 0.5f, 0.8f) }
+        // First frame to initialize
+        engine.update(PoseFrame(1000, joints))
+        // After 250ms settling
+        val obs1 = engine.update(PoseFrame(1300, joints))
+        assertTrue(obs1.tracking)
+        val obs2 = engine.update(PoseFrame(2300, joints))
+        assertEquals(1, obs2.holdSeconds)
+    }
     @Test fun aspectRatioCorrectsJointAngles() {
         assertEquals(90.0,PoseEngine.angle(Joint(0f,0f),Joint(.5f,0f),Joint(.5f,.5f),2f),.001)
     }
@@ -78,8 +89,8 @@ class DomainTest {
         assertEquals(Catalog.exercises.size,Catalog.byId.size)
         assertTrue(Catalog.exercises.size>=60)
         assertTrue(Catalog.exercises.all { it.equipment in setOf("Bodyweight","Dumbbells","Bands","Bench") })
-        assertTrue(Catalog.exercises.all { it.camera==null || it.camera in setOf("squat","rdl","press","pushup","plank") })
-        assertTrue(Catalog.exercises.all { it.effectiveCamera in setOf("squat","rdl","press","pushup","plank","pull") })
+        assertTrue(Catalog.exercises.all { it.camera==null || it.camera in setOf("squat","rdl","press","pushup","plank","timed","curl") })
+        assertTrue(Catalog.exercises.all { it.effectiveCamera in setOf("squat","rdl","press","pushup","plank","pull","timed","curl") })
         for(eq in listOf(setOf("Bodyweight"),setOf("Bodyweight","Dumbbells"),setOf("Bodyweight","Bands"),setOf("Bodyweight","Dumbbells","Bench"))) {
             var state=AppState(profile=Profile(equipment=eq))
             for(v in 0..3) {
@@ -123,5 +134,45 @@ class DomainTest {
         val firstIdx=supersetSession.plan.indexOf(firstEx)
         val afterFirstSet=Training.saveSet(supersetSession.copy(currentExercise=firstIdx),SetResult(exerciseId=firstEx.exerciseId,setIndex=0,reps=10,weightKg=10.0))
         assertNotEquals(firstIdx,afterFirstSet.currentExercise)
+    }
+
+    @Test fun workoutTitlesUseDescriptiveAnatomyGroupsAndNeverRawABCD() {
+        val state = AppState(profile = Profile(equipment = setOf("Bodyweight", "Dumbbells", "Bench")))
+
+        // 1. Freshest muscle group title shouldn't have "ABCD"
+        val freshSession = Training.generate(state, CheckIn(focus = "Fresh Muscle Groups"))
+        assertFalse(freshSession.title.contains("Fresh Muscle Groups A"))
+        assertFalse(freshSession.title.contains("Fresh Muscle Groups B"))
+        assertFalse(freshSession.title.contains("Fresh Muscle Groups C"))
+        assertFalse(freshSession.title.contains("Fresh Muscle Groups D"))
+        assertTrue(freshSession.title.contains("Upper Body") || freshSession.title.contains("Lower Body") || freshSession.title.contains("Full Body") || freshSession.title.contains("Push") || freshSession.title.contains("Pull"))
+
+        // 2. Full Body shouldn't have "Full Body A" etc
+        val fullBodySession = Training.generate(state, CheckIn(focus = "Full Body"))
+        assertFalse(fullBodySession.title.matches(Regex(".*Full Body [A-D].*")))
+        assertTrue(fullBodySession.title.startsWith("Full Body ("))
+
+        // 3. Explicit Target Muscles
+        val chestSession = Training.generate(state, CheckIn(targetMuscles = setOf("Chest")))
+        assertTrue(chestSession.title.startsWith("Chest Focus"))
+
+        val backBicepsSession = Training.generate(state, CheckIn(targetMuscles = setOf("Back", "Biceps")))
+        assertTrue(backBicepsSession.title.startsWith("Upper Body (Back & Biceps)"))
+
+        val legSession = Training.generate(state, CheckIn(targetMuscles = setOf("Quads", "Glutes")))
+        assertTrue(legSession.title.startsWith("Lower Body (Quads & Glutes)"))
+
+        val fullBodyTarget = Training.generate(state, CheckIn(targetMuscles = setOf("Quads", "Chest")))
+        assertTrue(fullBodyTarget.title.startsWith("Full Body (Quads & Chest)"))
+
+        // 4. Focus splits
+        val upperSession = Training.generate(state, CheckIn(focus = "Upper Body"))
+        assertTrue(upperSession.title.startsWith("Upper Body") || upperSession.title.startsWith("Push") || upperSession.title.startsWith("Pull") || upperSession.title.contains("Shoulders"))
+
+        val lowerSession = Training.generate(state, CheckIn(focus = "Lower Body"))
+        assertTrue(lowerSession.title.startsWith("Lower Body"))
+
+        val coreSession = Training.generate(state, CheckIn(focus = "Core & Mobility"))
+        assertEquals("Core & Mobility", coreSession.title)
     }
 }

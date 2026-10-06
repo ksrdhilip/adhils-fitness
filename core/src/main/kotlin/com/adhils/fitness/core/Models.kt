@@ -2,20 +2,34 @@ package com.adhils.fitness.core
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import java.util.UUID
-
 val AppJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
-fun newId(): String = UUID.randomUUID().toString()
+@OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+fun newId(): String = kotlin.uuid.Uuid.random().toString()
+
 
 @Serializable data class Profile(
-    val name: String = "Dhilip", val goal: String = "Build muscle",
+    val name: String = "", val goal: String = "Build muscle",
     val experience: String = "Beginner", val equipment: Set<String> = setOf("Dumbbells", "Bodyweight"),
     val days: Int = 3, val minutes: Int = 40, val unit: String = "lb",
     val excluded: Set<String> = emptySet(), val restrictions: String = "",
     val voice: Boolean = true, val experimentalCues: Boolean = true,
     val theme: String = "Dark", val onboardingComplete: Boolean = false,
     val bodyWeight: Double? = null, val gymPreset: String = "Home Gym",
-    val weightStep: Double = 2.5
+    val weightStep: Double = 2.5,
+    val fitnessHabit: String = "",
+    val rawExperience: String = "",
+    val availableDumbbellWeights: List<Double> = emptyList(),
+    val scheduleType: String = "days_per_week",
+    val specificDays: Set<String> = emptySet(),
+    val workoutPreviewEnabled: Boolean = true,
+    val workoutPreviewTime: String = "9:00 AM",
+    val healthSyncEnabled: Boolean = false,
+    val gender: String = "",
+    val birthDate: String = "",
+    val heightCm: Double? = null,
+    val bodyFatPercentage: Double? = null,
+    val connectedWearable: String? = null,
+    val healthPermissions: Map<String, Boolean> = emptyMap()
 )
 @Serializable data class Exercise(
     val id: String, val name: String, val pattern: String, val equipment: String,
@@ -27,10 +41,18 @@ fun newId(): String = UUID.randomUUID().toString()
         "Squat" -> "squat"
         "Hinge" -> "rdl"
         "Push" -> if (equipment == "Bodyweight" && "pushup" in id) "pushup" else "press"
-        "Pull" -> "pull"
+        "Pull" -> if ("curl" in id) "curl" else "pull"
         "Carry" -> "plank"
         "Core" -> if (timed) "plank" else "pushup"
-        else -> "squat"
+        "Warm-up", "Mobility" -> if (timed) "timed" else "squat"
+        "Accessory" -> when {
+            timed -> "timed"
+            "curl" in id -> "curl"
+            "raise" in id || "press" in id || "shrug" in id || "extension" in id || "pushdown" in id || "dip" in id || "kickback" in id -> "press"
+            "calf" in id -> "timed"
+            else -> "squat"
+        }
+        else -> if (timed) "timed" else "squat"
     }
 }
 @Serializable data class PlannedExercise(
@@ -42,17 +64,17 @@ fun newId(): String = UUID.randomUUID().toString()
     val id: String = newId(), val exerciseId: String, val setIndex: Int,
     val reps: Int = 0, val weightKg: Double = 0.0, val seconds: Int = 0,
     val rpe: Int? = null, val warmup: Boolean = false, val notes: String = "",
-    val savedAt: Long = System.currentTimeMillis(), val observations: List<String> = emptyList(),
+    val savedAt: Long = nowMillis(), val observations: List<String> = emptyList(),
     val setType: String = "Working"
 )
 @Serializable data class Session(
-    val id: String = newId(), val title: String = "Full Body A",
-    val startedAt: Long = System.currentTimeMillis(), val finishedAt: Long? = null,
+    val id: String = newId(), val title: String = "Full Body",
+    val startedAt: Long = nowMillis(), val finishedAt: Long? = null,
     val plan: List<PlannedExercise> = emptyList(), val results: List<SetResult> = emptyList(),
     val currentExercise: Int = 0, val revision: Int = 0, val restUntil: Long = 0
 )
-@Serializable data class Measurement(val at: Long = System.currentTimeMillis(), val weightKg: Double)
-@Serializable data class ChatEntry(val role: String, val text: String, val at: Long = System.currentTimeMillis())
+@Serializable data class Measurement(val at: Long = nowMillis(), val weightKg: Double)
+@Serializable data class ChatEntry(val role: String, val text: String, val at: Long = nowMillis())
 @Serializable data class SavedRoutine(val id: String = newId(), val name: String, val plan: List<PlannedExercise>)
 @Serializable data class AppState(
     val schemaVersion: Int = 1, val profile: Profile = Profile(),

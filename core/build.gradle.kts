@@ -1,9 +1,32 @@
-plugins { kotlin("jvm"); kotlin("plugin.serialization") }
-kotlin { jvmToolchain(21) }
-dependencies {
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
-    testImplementation(kotlin("test-junit5"))
-    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.11.4")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.4")
+plugins {
+    kotlin("multiplatform")
+    kotlin("plugin.serialization")
 }
-tasks.test { useJUnitPlatform() }
+
+kotlin {
+    jvmToolchain(21)
+    jvm()
+    listOf(
+        iosX64(),
+        iosArm64(),
+        iosSimulatorArm64()
+    )
+
+    sourceSets {
+        commonMain {
+            kotlin.srcDirs("src/main/kotlin")
+            dependencies {
+                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
+            }
+        }
+        jvmMain {
+            kotlin.srcDirs("src/jvmMain/kotlin")
+        }
+        commonTest {
+            kotlin.srcDirs("src/test/kotlin")
+            dependencies {
+                implementation(kotlin("test"))
+            }
+        }
+    }
+}

@@ -13,8 +13,8 @@ android {
         applicationId = "com.adhils.fitness"
         minSdk = 28
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.1.4"
+        versionCode = 6
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; buildConfig = true }
@@ -26,7 +26,8 @@ android {
 }
 dependencies {
     implementation(project(":core"))
-    implementation(platform("androidx.compose:compose-bom:2025.05.01"))
+    implementation(project(":shared"))
+    implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
@@ -44,8 +45,9 @@ dependencies {
     implementation("com.google.mediapipe:tasks-vision:0.10.26")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("androidx.health.connect:connect-client:1.1.0-alpha11")
     testImplementation("junit:junit:4.13.2")
-    androidTestImplementation(platform("androidx.compose:compose-bom:2025.05.01"))
+    androidTestImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

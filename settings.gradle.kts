@@ -4,4 +4,4 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = "ADhilsFitness"
-include(":app", ":core")
+include(":app", ":core", ":shared")

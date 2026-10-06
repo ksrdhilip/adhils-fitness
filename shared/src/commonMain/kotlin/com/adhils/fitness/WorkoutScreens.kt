@@ -1,7 +1,9 @@
 package com.adhils.fitness
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -13,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.adhils.fitness.core.*
 import kotlinx.coroutines.delay
 
@@ -23,14 +26,14 @@ object CameraDraft { var value by mutableStateOf<CameraSetDraft?>(null) }
 @Composable fun WorkoutScreen(state:AppState,s:Session,vm:FitnessViewModel,onBack:()->Unit,onExercise:(String)->Unit,onCamera:()->Unit,onFinish:()->Unit) {
     val plan=s.plan[s.currentExercise]; val e=Catalog.get(plan.exerciseId); val profile=state.profile
     val prBadges by vm.lastPrBadges.collectAsState()
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    var viewMode by rememberSaveable { mutableStateOf("stacked") } // "stacked" (Fitbod Card Stack) or "focus" (Timer & Detail View)
+    var now by remember { mutableLongStateOf(nowMillis()) }
+    var viewMode by rememberSaveable { mutableStateOf("stacked") } // "stacked" (Card Stack) or "focus" (Timer & Detail View)
     var trendExerciseId by remember { mutableStateOf<String?>(null) }
     var replacingExercise by remember { mutableStateOf<Exercise?>(null) }
     var adding by remember { mutableStateOf(false) }
     var finish by remember { mutableStateOf(false) }
 
-    LaunchedEffect(s.id) { while(true) { now=System.currentTimeMillis();delay(1000) } }
+    LaunchedEffect(s.id) { while(true) { now=nowMillis();delay(200) } }
     val draft=CameraDraft.value
     LaunchedEffect(draft) {
         if(draft!=null && draft.profileId==vm.store.value.selectedId && draft.sessionId==s.id) {
@@ -53,7 +56,18 @@ object CameraDraft { var value by mutableStateOf<CameraSetDraft?>(null) }
         }
     }
 
-    ScreenHeader(s.title,onBack,action={
+    val cleanSessionTitle = remember(s.title) {
+        if (s.title.contains("Fresh Muscle") || s.title.matches(Regex(".* [A-D]( · .*)?"))) {
+            val chosenEx = s.plan.mapNotNull { Catalog.byId[it.exerciseId] }
+            if (chosenEx.isNotEmpty()) {
+                val clean = Training.computeWorkoutTitle(chosenEx)
+                val suffix = if (s.title.contains(" · Light")) " · Light" else if (s.title.contains(" · Strong")) " · Strong" else ""
+                "$clean$suffix"
+            } else s.title
+        } else s.title
+    }
+
+    ScreenHeader(cleanSessionTitle,onBack,action={
         Button(
             onClick={finish=true},
             enabled=s.results.isNotEmpty(),
@@ -61,20 +75,28 @@ object CameraDraft { var value by mutableStateOf<CameraSetDraft?>(null) }
             shape=androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
         ) { Text("Finish (${s.results.size})") }
     })
-    val sessionVolKg=remember(s.results) { Recovery.sessionVolumeKg(s) }
+    val sessionVolKg = remember(s.results) { Recovery.sessionVolumeKg(s) }
     SmallLabel("${s.plan.size} Exercises · ${durationText(now-s.startedAt)} Elapsed · Session Tonnage: ${weightLabel(sessionVolKg,profile)}")
 
-    // Active Rest Timer Banner (Persistent across both Stacked & Focus views)
-    if(s.restUntil>now) PanelCard {
-        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
-            Column {
-                SmallLabel("ACTIVE REST TIMER")
-                Text("Rest · ${durationText(s.restUntil-now)}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Bold,color=MaterialTheme.colorScheme.primary)
-            }
-            Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-                OutlinedButton(onClick={vm.changeRest(-5_000)},modifier=Modifier.heightIn(min=48.dp)) {Text("-5s")}
-                OutlinedButton(onClick={vm.changeRest(5_000)},modifier=Modifier.heightIn(min=48.dp)) {Text("+5s")}
-                TextButton(onClick={vm.changeRest(0)},modifier=Modifier.heightIn(min=48.dp)) {Text("Skip")}
+    // Galaxy Watch & Wearable Live Metrics Banner
+    if (state.profile.healthSyncEnabled) {
+        val wearable = HealthWearableManager.connectedDevice.collectAsState().value
+        if (wearable != null) {
+            PanelCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("⌚")
+                        Column {
+                            SmallLabel("${wearable.name} · LIVE VITALS")
+                            Text("❤️ ${wearable.liveHeartRateBpm} bpm · 🔥 ${wearable.caloriesBurnedToday} kcal", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Text("${wearable.batteryPct}% 🔋", style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
     }
@@ -94,37 +116,54 @@ object CameraDraft { var value by mutableStateOf<CameraSetDraft?>(null) }
         }
     }
 
-    // Fitbod Mode Switcher + Add Exercise
-    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
-        FilterChip(
-            selected=viewMode=="stacked",
-            onClick={viewMode="stacked"},
-            label={Text("📋 All Exercises (Fitbod)")},
-            modifier=Modifier.heightIn(min=48.dp)
-        )
-        FilterChip(
-            selected=viewMode=="focus",
-            onClick={viewMode="focus"},
-            label={Text("⏱ Focus & Timers")},
-            modifier=Modifier.heightIn(min=48.dp)
-        )
-        Spacer(Modifier.weight(1f))
-        OutlinedButton(onClick={adding=true},enabled=s.plan.size<30,modifier=Modifier.heightIn(min=48.dp)) {
-            Text("+ Exercise")
+    // Mode Switcher + Add Exercise
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val isCompact = maxWidth < 420.dp
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilterChip(
+                    selected = viewMode == "stacked",
+                    onClick = { viewMode = "stacked" },
+                    label = { Text(if (isCompact) "📋 All" else "📋 All Exercises", maxLines = 1) },
+                    modifier = Modifier.heightIn(min = 44.dp)
+                )
+                FilterChip(
+                    selected = viewMode == "focus",
+                    onClick = { viewMode = "focus" },
+                    label = { Text(if (isCompact) "⏱ Focus" else "⏱ Focus & Timers", maxLines = 1) },
+                    modifier = Modifier.heightIn(min = 44.dp)
+                )
+            }
+            OutlinedButton(
+                onClick = { adding = true },
+                enabled = s.plan.size < 30,
+                modifier = Modifier.heightIn(min = 44.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text("+ Exercise", maxLines = 1, softWrap = false)
+            }
         }
     }
 
     if(viewMode=="stacked") {
-        // FITBOD 2.1 STACKED EXERCISE CARDS VIEW
+        // STACKED EXERCISE CARDS VIEW
         s.plan.forEachIndexed { idx, pItem ->
             key(s.id, pItem.exerciseId) {
-                FitbodExerciseCard(
+                StackedExerciseCard(
                     index=idx,
                     totalCount=s.plan.size,
                     plan=pItem,
                     session=s,
                     state=state,
                     vm=vm,
+                    now=now,
                     onFocusTimer={ vm.nextExercise(idx); viewMode="focus" },
                     onOpenCamera={ vm.nextExercise(idx); onCamera() },
                     onOpenTrend={ trendExerciseId=pItem.exerciseId },
@@ -165,6 +204,16 @@ object CameraDraft { var value by mutableStateOf<CameraSetDraft?>(null) }
             }
         }
         ExercisePostureMediaCard(e, state, vm, onOpenCameraCoach = onCamera)
+        // Inline Rest Timer for Current Exercise
+        if (s.restUntil > 0L && (s.restUntil + 1200L > now)) {
+            InlineRestTimerCard(
+                restUntil = s.restUntil,
+                now = now,
+                totalSeconds = plan.restSeconds,
+                onAdjust = { delta -> vm.changeRest(delta) },
+                onSkip = { vm.changeRest(0) }
+            )
+        }
         key(s.id,e.id) {
             var setIndex by remember {mutableIntStateOf((0 until plan.sets).firstOrNull { i->s.results.none {it.exerciseId==e.id && it.setIndex==i} } ?: 0)}
             LaunchedEffect(plan.sets) { if(setIndex>=plan.sets) setIndex=(plan.sets-1).coerceAtLeast(0) }
@@ -184,10 +233,15 @@ object CameraDraft { var value by mutableStateOf<CameraSetDraft?>(null) }
             }
             LaunchedEffect(exTimerRunning, exTimerRemaining) {
                 if(exTimerRunning && exTimerRemaining>0) {
+                    if (exTimerRemaining in 1..5) {
+                        WorkoutSoundManager.playCountdownBeep()
+                    }
                     delay(1000)
-                    exTimerRemaining=(exTimerRemaining-1).coerceAtLeast(0)
-                    if(e.timed) seconds=(plan.seconds-exTimerRemaining).coerceAtLeast(1).toString()
-                    if(exTimerRemaining==0) {
+                    val next = (exTimerRemaining-1).coerceAtLeast(0)
+                    exTimerRemaining = next
+                    if(e.timed) seconds=(plan.seconds-next).coerceAtLeast(1).toString()
+                    if(next==0) {
+                        WorkoutSoundManager.playTimerFinishedChime()
                         exTimerRunning=false
                         if(e.timed) seconds=plan.seconds.toString()
                     }
@@ -201,8 +255,18 @@ object CameraDraft { var value by mutableStateOf<CameraSetDraft?>(null) }
             PanelCard {
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
                     Column {
-                        SmallLabel("EXERCISE TIMER")
-                        Text(durationText(exTimerRemaining*1000L),style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold,color=MaterialTheme.colorScheme.primary)
+                        val isFinal5 = exTimerRunning && exTimerRemaining in 1..5
+                        if (isFinal5) {
+                            Text("🔥 FINAL ${exTimerRemaining}s · FINISH STRONG!", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color(0xFFFF5252))
+                        } else {
+                            SmallLabel("EXERCISE TIMER")
+                        }
+                        Text(
+                            durationText(exTimerRemaining*1000L),
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isFinal5) Color(0xFFFF5252) else MaterialTheme.colorScheme.primary
+                        )
                         SmallLabel("Target: ${plan.seconds}s")
                     }
                     Row(horizontalArrangement=Arrangement.spacedBy(6.dp),verticalAlignment=Alignment.CenterVertically) {
@@ -342,17 +406,179 @@ object CameraDraft { var value by mutableStateOf<CameraSetDraft?>(null) }
     trendExerciseId?.let { exId ->
         ExerciseTrendModal(exId,state,vm,onDismiss={trendExerciseId=null})
     }
-    if(finish) AlertDialog(onDismissRequest={finish=false},title={Text("Finish your workout?")},text={Text("${s.results.size} sets have been logged. Uncompleted sets will remain unlogged.")},confirmButton={TextButton(onClick={finish=false;onFinish()}) {Text("Finish")}},dismissButton={TextButton(onClick={finish=false}) {Text("Keep training")}})
+    val nextWorkoutForDialog = remember(s.id, state.sessions) {
+        runCatching {
+            val completedSessions = if (state.sessions.any { it.id == s.id && it.finishedAt != null }) {
+                state.sessions
+            } else {
+                state.sessions.filterNot { it.id == s.id } + s.copy(finishedAt = nowMillis())
+            }
+            val nextState = state.copy(sessions = completedSessions)
+            Training.generate(nextState, CheckIn(minutes = state.profile.minutes, focus = "Freshest Muscles (Auto)"))
+        }.getOrNull()
+    }
+    val dialogNextTitle = nextWorkoutForDialog?.title ?: "Next Scheduled Routine"
+
+    if(finish) AlertDialog(
+        onDismissRequest={finish=false},
+        title={Text("Finish your workout?")},
+        text={
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("${s.results.size} sets have been logged. Uncompleted sets will remain unlogged.")
+                Surface(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text("🗓", fontSize = 20.sp)
+                        Column {
+                            Text(
+                                "Next workout is $dialogNextTitle",
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            if (nextWorkoutForDialog != null) {
+                                SmallLabel("${nextWorkoutForDialog.plan.size} planned exercises · ${state.profile.minutes} min")
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton={TextButton(onClick={finish=false;onFinish()}) {Text("Finish & View Summary")}},
+        dismissButton={TextButton(onClick={finish=false}) {Text("Keep training")}}
+    )
+}
+
+@Composable
+fun InlineRestTimerCard(
+    restUntil: Long,
+    now: Long,
+    totalSeconds: Int,
+    onAdjust: (Long) -> Unit,
+    onSkip: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val remainingMs = (restUntil - now).coerceAtLeast(0L)
+    val remainingSec = ((remainingMs + 999L) / 1000L).toInt()
+    val totalMs = (totalSeconds * 1000L).coerceAtLeast(1000L)
+    val progress = ((totalMs - remainingMs).toFloat() / totalMs).coerceIn(0f, 1f)
+    val isFinished = (remainingMs == 0L)
+    val isLast5Sec = !isFinished && remainingSec in 1..5
+
+    // Audio countdown trigger
+    var lastBeepSecond by remember(restUntil) { mutableIntStateOf(-1) }
+    LaunchedEffect(remainingSec, restUntil) {
+        if (restUntil > 0L) {
+            if (remainingSec in 1..5 && remainingSec != lastBeepSecond) {
+                lastBeepSecond = remainingSec
+                WorkoutSoundManager.playCountdownBeep()
+            } else if (remainingSec == 0 && lastBeepSecond in 1..5) {
+                lastBeepSecond = 0
+                WorkoutSoundManager.playTimerFinishedChime()
+            }
+        }
+    }
+
+    val cardBg = when {
+        isFinished -> Color(0xFF132A1C)
+        isLast5Sec -> Color(0xFF2E1515)
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val accentColor = when {
+        isFinished -> Mint
+        isLast5Sec -> Color(0xFFFF5252)
+        else -> MaterialTheme.colorScheme.primary
+    }
+
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = cardBg,
+        border = if (isLast5Sec) androidx.compose.foundation.BorderStroke(2.dp, Color(0xFFFF5252))
+                 else if (isFinished) androidx.compose.foundation.BorderStroke(2.dp, Mint)
+                 else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(if (isFinished) "✅" else if (isLast5Sec) "🔥" else "⏱", style = MaterialTheme.typography.titleMedium)
+                    Column {
+                        if (isFinished) {
+                            Text("REST COMPLETE · GET READY!", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Mint)
+                            Text("00:00", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Mint)
+                        } else if (isLast5Sec) {
+                            Text("FINAL ${remainingSec}s · PREPARE SET", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color(0xFFFF5252))
+                            Text(durationText(remainingMs), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color(0xFFFF5252))
+                        } else {
+                            SmallLabel("ACTIVE REST TIMER")
+                            Text("Rest · ${durationText(remainingMs)}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = accentColor)
+                        }
+                    }
+                }
+                if (!isFinished) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(
+                            onClick = { onAdjust(-5_000) },
+                            modifier = Modifier.heightIn(min = 40.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) { Text("-5s") }
+                        OutlinedButton(
+                            onClick = { onAdjust(5_000) },
+                            modifier = Modifier.heightIn(min = 40.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) { Text("+5s") }
+                        TextButton(
+                            onClick = onSkip,
+                            modifier = Modifier.heightIn(min = 40.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        ) { Text("Skip") }
+                    }
+                }
+            }
+
+            // Visual Progress Bar
+            LinearProgressIndicator(
+                progress = { if (isFinished) 1f else progress },
+                modifier = Modifier.fillMaxWidth().height(6.dp),
+                color = accentColor,
+                trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+            )
+
+            if (isLast5Sec) {
+                Text(
+                    "Starting next set in $remainingSec seconds! Take your grip.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFFF8A80),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
-@Composable fun FitbodExerciseCard(
+@Composable fun StackedExerciseCard(
     index:Int,
     totalCount:Int,
     plan:PlannedExercise,
     session:Session,
     state:AppState,
     vm:FitnessViewModel,
+    now:Long,
     onFocusTimer:()->Unit,
     onOpenCamera:()->Unit,
     onOpenTrend:()->Unit,
@@ -368,20 +594,30 @@ object CameraDraft { var value by mutableStateOf<CameraSetDraft?>(null) }
         state.sessions.filter { it.finishedAt!=null }.flatMap { it.results }.filter { it.exerciseId==e.id && !it.warmup }
     }
     val completedCount=session.results.count { it.exerciseId==e.id }
+    val isCurrent = (index == session.currentExercise)
+    val isRestingHere = isCurrent && (session.restUntil > 0L && (session.restUntil + 1200L > now))
+    val isFinal5 = isRestingHere && (session.restUntil - now) in 1..5000L
 
-    PanelCard {
+    val cardBorder = if (isFinal5) {
+        Modifier.border(2.dp, Color(0xFFFF5252), RoundedCornerShape(18.dp))
+    } else if (isRestingHere) {
+        Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(18.dp))
+    } else {
+        Modifier
+    }
+
+    PanelCard(modifier = cardBorder) {
         // Card Header: Video Thumbnail Cell + Title + Reorder & Context Menu
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-            Surface(
-                onClick={showVideo=!showVideo},
-                shape=androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
-                color=MaterialTheme.colorScheme.surfaceVariant,
-                modifier=Modifier.size(56.dp)
-            ) {
-                Box(contentAlignment=Alignment.Center) {
-                    Text(if(showVideo) "▾" else "▶",fontWeight=FontWeight.Bold,color=MaterialTheme.colorScheme.primary)
-                }
-            }
+            ExerciseThumbnail(
+                exerciseId = e.id,
+                modifier = Modifier.size(56.dp),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                contentDescription = e.name,
+                showVideoIndicator = true,
+                isVideoExpanded = showVideo,
+                onClick = { showVideo = !showVideo }
+            )
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
                     Text(e.name,style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold)
@@ -434,7 +670,18 @@ object CameraDraft { var value by mutableStateOf<CameraSetDraft?>(null) }
             ExercisePostureMediaCard(e, state, vm, onOpenCameraCoach = onOpenCamera)
         }
 
-        // Fitbod Nested Set Logging Grid Header
+        // Inline Active Rest Timer for Current Workout
+        if (isRestingHere) {
+            InlineRestTimerCard(
+                restUntil = session.restUntil,
+                now = now,
+                totalSeconds = plan.restSeconds,
+                onAdjust = { delta -> vm.changeRest(delta) },
+                onSkip = { vm.changeRest(0) }
+            )
+        }
+
+        // Nested Set Logging Grid Header
         Row(Modifier.fillMaxWidth().padding(horizontal=4.dp),verticalAlignment=Alignment.CenterVertically) {
             SmallLabel("SET")
             Spacer(Modifier.width(24.dp))
@@ -458,28 +705,55 @@ object CameraDraft { var value by mutableStateOf<CameraSetDraft?>(null) }
                 profile=profile,
                 logged=logged,
                 previous=prevSet,
-                onSave={ res -> vm.saveSet(res) }
+                onSave={ res ->
+                    vm.nextExercise(index)
+                    vm.saveSet(res)
+                }
             )
         }
 
-        // Card Footer Actions (Oversized 48dp touch targets)
-        FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-            OutlinedButton(onClick={vm.adjustSetCount(e.id,1)},enabled=plan.sets<8,modifier=Modifier.heightIn(min=48.dp)) {
-                Text("+ Add Set")
+        // Card Footer Actions (Compact 36dp single-row layout)
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            OutlinedButton(
+                onClick = { vm.adjustSetCount(e.id, 1) },
+                enabled = plan.sets < 8,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                modifier = Modifier.height(36.dp)
+            ) {
+                Text("+ Set", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium)
             }
-            if(plan.sets>1 && completedCount<plan.sets) {
-                TextButton(onClick={vm.adjustSetCount(e.id,-1)},modifier=Modifier.heightIn(min=48.dp)) {
-                    Text("- Set")
+            if (plan.sets > 1 && completedCount < plan.sets) {
+                OutlinedButton(
+                    onClick = { vm.adjustSetCount(e.id, -1) },
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Text("- Set", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium)
                 }
             }
-            OutlinedButton(onClick=onOpenCamera,modifier=Modifier.heightIn(min=48.dp)) {
-                Text("🎥 AI Camera")
+            OutlinedButton(
+                onClick = onOpenCamera,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                modifier = Modifier.height(36.dp)
+            ) {
+                Text("🎥 AI", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
             }
-            OutlinedButton(onClick=onOpenTrend,modifier=Modifier.heightIn(min=48.dp)) {
-                Text("📈 1RM")
+            OutlinedButton(
+                onClick = onOpenTrend,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                modifier = Modifier.height(36.dp)
+            ) {
+                Text("📈 1RM", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium)
             }
-            TextButton(onClick=onFocusTimer,modifier=Modifier.heightIn(min=48.dp)) {
-                Text("⏱ Timer")
+            OutlinedButton(
+                onClick = onFocusTimer,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                modifier = Modifier.height(36.dp)
+            ) {
+                Text("⏱", fontSize = 20.sp)
             }
         }
     }
@@ -654,7 +928,7 @@ object CameraDraft { var value by mutableStateOf<CameraSetDraft?>(null) }
                                     (size.height-16f-((it.second-low)/range*(size.height-32f))).toFloat()
                                 )
                             }
-                            pts.zipWithNext().forEach { (a,b) -> drawLine(FitbodRed,a,b,3.dp.toPx()) }
+                            pts.zipWithNext().forEach { (a,b) -> drawLine(BrandRed,a,b,3.dp.toPx()) }
                             pts.forEach { drawCircle(Mint,5.dp.toPx(),it) }
                         }
                         SmallLabel("Range: ${decimal(low)} – ${decimal(high)} ${if(e.timed) "sec" else p.unit} across ${trendPoints.size} sessions")
@@ -662,9 +936,9 @@ object CameraDraft { var value by mutableStateOf<CameraSetDraft?>(null) }
                 }
                 SmallLabel("RECENT SESSION HISTORY")
                 completed.reversed().forEach { s ->
-                    val exSets=s.results.filter { it.exerciseId==exerciseId }
-                    if(exSets.isNotEmpty()) {
-                        val date=java.time.Instant.ofEpochMilli(s.startedAt).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                    val exSets = s.results.filter { it.exerciseId == exerciseId }
+                    if (exSets.isNotEmpty()) {
+                        val date = formatDate(s.startedAt)
                         val summary=exSets.sortedBy { it.setIndex }.joinToString(", ") { r ->
                             if(e.timed) "${r.seconds}s" else "${weightLabel(r.weightKg,p)}×${r.reps}"
                         }
