@@ -3,12 +3,14 @@ package com.adhils.fitness
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,15 +44,87 @@ fun TodayScreen(
     val preview = remember(state, quickCheck) { runCatching { Training.generate(state, quickCheck) }.getOrNull() }
     val recovery = remember(state) { Recovery.calculate(state) }
 
-    // Top Gym Profile Bar + Consolidated Filter Pills
-    PanelCard {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+    val plannedExercises = (state.active ?: preview)?.plan ?: emptyList()
+    val musclesCount = remember(plannedExercises) {
+        plannedExercises.mapNotNull { Catalog.byId[it.exerciseId] }
+            .flatMap { Recovery.extractMuscles(it) }
+            .distinct().size.coerceAtLeast(1)
+    }
+    val freshMuscles = remember(recovery) { Recovery.freshestMuscles(state, 3) }
+
+    val activeDisplayTitle = remember(state.active, preview) {
+        state.active?.let { act ->
+            if (act.title.contains("Fresh Muscle") || act.title.matches(Regex(".* [A-D]( · .*)?"))) {
+                val chosenEx = act.plan.mapNotNull { Catalog.byId[it.exerciseId] }
+                if (chosenEx.isNotEmpty()) {
+                    val clean = Training.computeWorkoutTitle(chosenEx)
+                    val suffix = if (act.title.contains(" · Light")) " · Light" else if (act.title.contains(" · Strong")) " · Strong" else ""
+                    "$clean$suffix"
+                } else act.title
+            } else act.title
+        } ?: preview?.title ?: "Full Body Strength"
+    }
+
+    // 1. Fitbod Today Workout Plan Overview Header (Matching Screenshot 1)
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SmallLabel("${(p.name.ifBlank { "ATHLETE" }).uppercase()}'S PLAN · TODAY")
+            IconButton(onClick = onStart, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.Tune, contentDescription = "Workout Generator Preferences", tint = Color(0xFF8E8E93))
+            }
+        }
+
+        Text(
+            text = activeDisplayTitle.uppercase(),
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Black,
+            color = Color.White,
+            fontSize = 26.sp
+        )
+
+        Text(
+            text = "${plannedExercises.size} Exercises • $musclesCount Muscles",
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = Color(0xFF8E8E93)
+        )
+
+        // Pill Selection Row
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             Box {
-                FilledTonalButton(onClick = { showGymMenu = true }, modifier = Modifier.heightIn(min = 48.dp)) {
-                    Icon(Icons.Default.FitnessCenter, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("${p.gymPreset} ▾", fontWeight = FontWeight.Bold)
+                FilterChip(
+                    selected = false,
+                    onClick = { showDurationMenu = true },
+                    label = { Text("${quickMinutes}m ▾", fontWeight = FontWeight.Bold) },
+                    modifier = Modifier.heightIn(min = 40.dp)
+                )
+                DropdownMenu(expanded = showDurationMenu, onDismissRequest = { showDurationMenu = false }) {
+                    listOf(20, 30, 40, 45, 60, 75).forEach { m ->
+                        DropdownMenuItem(
+                            text = { Text("${m} min") },
+                            onClick = { quickMinutes = m; showDurationMenu = false }
+                        )
+                    }
                 }
+            }
+
+            Box {
+                FilterChip(
+                    selected = false,
+                    onClick = { showGymMenu = true },
+                    label = { Text("${p.gymPreset} ▾", fontWeight = FontWeight.Bold) },
+                    modifier = Modifier.heightIn(min = 40.dp)
+                )
                 DropdownMenu(expanded = showGymMenu, onDismissRequest = { showGymMenu = false }) {
                     listOf("Home Gym", "Commercial Gym", "Bodyweight / Travel").forEach { preset ->
                         DropdownMenuItem(
@@ -60,18 +134,13 @@ fun TodayScreen(
                     }
                 }
             }
-            TextButton(onClick = onStart, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text("Check-in & AI ⚙")
-            }
-        }
-        SmallLabel("WORKOUT GENERATOR FILTERS")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+
             Box {
                 FilterChip(
                     selected = true,
                     onClick = { showSplitMenu = true },
-                    label = { Text(quickFocus.substringBefore(" (") + " ▾") },
-                    modifier = Modifier.heightIn(min = 42.dp)
+                    label = { Text(quickFocus.substringBefore(" (") + " ▾", fontWeight = FontWeight.Bold) },
+                    modifier = Modifier.heightIn(min = 40.dp)
                 )
                 DropdownMenu(expanded = showSplitMenu, onDismissRequest = { showSplitMenu = false }) {
                     listOf(
@@ -91,37 +160,17 @@ fun TodayScreen(
                     }
                 }
             }
+
             FilterChip(
                 selected = quickMuscles.isNotEmpty() || showMusclePicker,
                 onClick = { showMusclePicker = !showMusclePicker },
                 label = { Text(if (quickMuscles.isEmpty()) "Target Muscles ▾" else "Muscles (${quickMuscles.size}) ▾") },
-                modifier = Modifier.heightIn(min = 42.dp)
-            )
-            Box {
-                FilterChip(
-                    selected = false,
-                    onClick = { showDurationMenu = true },
-                    label = { Text("${quickMinutes}m ▾") },
-                    modifier = Modifier.heightIn(min = 42.dp)
-                )
-                DropdownMenu(expanded = showDurationMenu, onDismissRequest = { showDurationMenu = false }) {
-                    listOf(20, 30, 40, 45, 60, 75).forEach { m ->
-                        DropdownMenuItem(
-                            text = { Text("${m} min") },
-                            onClick = { quickMinutes = m; showDurationMenu = false }
-                        )
-                    }
-                }
-            }
-            FilterChip(
-                selected = quickSupersets,
-                onClick = { quickSupersets = !quickSupersets },
-                label = { Text(if (quickSupersets) "⚡ Supersets ON" else "⚡ Supersets OFF") },
-                modifier = Modifier.heightIn(min = 42.dp)
+                modifier = Modifier.heightIn(min = 40.dp)
             )
         }
+
         if (showMusclePicker) {
-            Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SmallLabel("PICK THE MUSCLE GROUPS YOU WANT TO WORK OUT")
                 val recoveryMap = remember(recovery) { recovery.associate { it.muscle to it.recoveryPercent } }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -137,45 +186,179 @@ fun TodayScreen(
                 }
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-        val activeDisplayTitle = remember(state.active) {
-            state.active?.let { act ->
-                if (act.title.contains("Fresh Muscle") || act.title.matches(Regex(".* [A-D]( · .*)?"))) {
-                    val chosenEx = act.plan.mapNotNull { Catalog.byId[it.exerciseId] }
-                    if (chosenEx.isNotEmpty()) {
-                        val clean = Training.computeWorkoutTitle(chosenEx)
-                        val suffix = if (act.title.contains(" · Light")) " · Light" else if (act.title.contains(" · Strong")) " · Strong" else ""
-                        "$clean$suffix"
-                    } else act.title
-                } else act.title
-            }
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                SmallLabel(if (state.active != null) "ACTIVE WORKOUT IN PROGRESS" else "GENERATED WORKOUT")
-                Text(activeDisplayTitle ?: preview?.title ?: "Set up your workout", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                SmallLabel("${state.active?.plan?.size ?: preview?.plan?.size ?: 0} Exercises · ${quickMinutes} Min · ${p.equipment.joinToString(", ")}")
-            }
-        }
-        PrimaryButton(
-            text = if (state.active != null) "Resume Active Workout →" else "Start Workout (${preview?.plan?.size ?: 0} Exercises) →",
-            enabled = state.active != null || preview != null,
-            onClick = {
-                if (state.active != null) onResume()
-                else {
-                    vm.start(quickCheck)
-                    onResume()
+
+        // AI Coach Guidance Card
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = Color(0xFF191B26),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF282B3C)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color(0xFF252838),
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("🤖", fontSize = 18.sp)
+                    }
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "AI COACH OVERVIEW",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Mint
+                    )
+                    Text(
+                        if (state.active != null) "Session in progress. Tap any exercise to log sets or start live AI Camera Coach."
+                        else "Balanced for your freshest muscles (${freshMuscles.joinToString(", ")}). Ready to train?",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFCCD0DF)
+                    )
                 }
             }
-        )
+        }
     }
 
-    SectionTitle("Workout Exercises", "Tap card for posture guide & 1RM, or tap camera to start AI Coach")
-    (state.active ?: preview)?.plan?.forEach { planned ->
-        ExerciseRow(
-            p = planned,
-            onCameraClick = onCameraExercise?.let { cb -> { cb(planned.exerciseId) } },
-            onClick = { onExercise(planned.exerciseId) }
+    // 2. Timeline Connected Exercise List (Matching Screenshot 1)
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        SectionTitle("Today's Exercises", "Tap exercise to open Exercise Log, form videos, or AI Camera Coach")
+
+        plannedExercises.forEachIndexed { index, planned ->
+            val e = Catalog.get(planned.exerciseId)
+            val isLast = index == plannedExercises.lastIndex
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Left Timeline Column
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.width(28.dp).padding(top = 16.dp)
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = if (state.active?.results?.any { it.exerciseId == e.id } == true) Mint else Color(0xFF2C2D3A),
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            if (state.active?.results?.any { it.exerciseId == e.id } == true) {
+                                Icon(Icons.Default.Check, null, modifier = Modifier.size(14.dp), tint = Color.Black)
+                            } else {
+                                Text("${index + 1}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        }
+                    }
+                    if (!isLast) {
+                        Box(
+                            modifier = Modifier
+                                .width(2.dp)
+                                .height(56.dp)
+                                .background(Color(0xFF2C2D3A))
+                        )
+                    }
+                }
+
+                // Exercise Row Card
+                Surface(
+                    onClick = { onExercise(planned.exerciseId) },
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFF1E202B),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2E3142)),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        ExerciseThumbnail(
+                            exerciseId = e.id,
+                            modifier = Modifier.size(54.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            contentDescription = e.name
+                        )
+
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = e.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            val setsText = "${planned.sets} Sets • " + if (e.timed) "${planned.seconds}s" else "${planned.minReps}–${planned.maxReps} Reps" +
+                                (if (planned.weightKg > 0.0) " • ${weightLabel(planned.weightKg, p)}" else " • Bodyweight")
+                            Text(
+                                text = setsText,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFFFF2D55)
+                            )
+                            SmallLabel("${e.muscles}")
+                        }
+
+                        if (onCameraExercise != null) {
+                            IconButton(
+                                onClick = { onCameraExercise(planned.exerciseId) },
+                                modifier = Modifier.size(38.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Videocam,
+                                    contentDescription = "AI Camera Coach",
+                                    tint = Mint,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Prominent Bottom Start Workout Button (Fitbod Coral/Pink-Red)
+    Button(
+        onClick = {
+            if (state.active != null) onResume()
+            else {
+                vm.start(quickCheck)
+                onResume()
+            }
+        },
+        enabled = state.active != null || plannedExercises.isNotEmpty(),
+        shape = RoundedCornerShape(16.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Color(0xFFE83F5B),
+            contentColor = Color.White
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(54.dp)
+    ) {
+        Icon(
+            imageVector = if (state.active != null) Icons.Default.PlayArrow else Icons.Default.FitnessCenter,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = if (state.active != null) "Resume Active Workout (In Progress) →"
+            else "Start Workout (${plannedExercises.size} Exercises)",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
         )
     }
 

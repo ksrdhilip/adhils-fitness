@@ -1,6 +1,8 @@
 package com.adhils.fitness
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -67,16 +69,65 @@ object CameraDraft { var value by mutableStateOf<CameraSetDraft?>(null) }
         } else s.title
     }
 
-    ScreenHeader(cleanSessionTitle,onBack,action={
-        Button(
-            onClick={finish=true},
-            enabled=s.results.isNotEmpty(),
-            modifier=Modifier.heightIn(min=48.dp),
-            shape=androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
-        ) { Text("Finish (${s.results.size})") }
-    })
-    val sessionVolKg = remember(s.results) { Recovery.sessionVolumeKg(s) }
-    SmallLabel("${s.plan.size} Exercises · ${durationText(now-s.startedAt)} Elapsed · Session Tonnage: ${weightLabel(sessionVolKg,profile)}")
+    ScreenHeader(cleanSessionTitle, onBack)
+
+    // Prominent Fitbod Live Workout Timer Banner (Matching Screenshot 2)
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFF14151C),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF262836)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .background(Color(0xFFFF2D55), androidx.compose.foundation.shape.CircleShape)
+                    )
+                    val elapsedSec = ((now - s.startedAt).coerceAtLeast(0) / 1000).toInt()
+                    val hrs = elapsedSec / 3600
+                    val mins = (elapsedSec % 3600) / 60
+                    val secs = elapsedSec % 60
+                    val mStr = if (mins < 10) "0$mins" else "$mins"
+                    val sStr = if (secs < 10) "0$secs" else "$secs"
+                    val timerStr = if (hrs > 0) "$hrs:$mStr:$sStr" else "0:$mStr:$sStr"
+                    Text(
+                        timerStr,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Black,
+                        color = Color.White,
+                        fontSize = 30.sp
+                    )
+                }
+                val sessionVolKg = Recovery.sessionVolumeKg(s)
+                val completedExCount = s.plan.count { pItem -> s.results.any { it.exerciseId == pItem.exerciseId } }
+                Text(
+                    "$completedExCount of ${s.plan.size} Completed · Volume: ${weightLabel(sessionVolKg, profile)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF8E8E93),
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            // Circular Stop Finish Button (Matching Screenshot 2)
+            Surface(
+                shape = androidx.compose.foundation.shape.CircleShape,
+                color = Color(0xFFE83F5B),
+                modifier = Modifier.size(50.dp),
+                onClick = { finish = true }
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Surface(shape = RoundedCornerShape(3.dp), color = Color.White, modifier = Modifier.size(16.dp)) {}
+                }
+            }
+        }
+    }
 
     // Galaxy Watch & Wearable Live Metrics Banner
     if (state.profile.healthSyncEnabled) {
@@ -618,7 +669,7 @@ fun InlineRestTimerCard(
                 isVideoExpanded = showVideo,
                 onClick = { showVideo = !showVideo }
             )
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f).clickable { onOpenDetail() }) {
                 Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
                     Text(e.name,style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold)
                     if(plan.supersetGroup!=null) {

@@ -92,29 +92,45 @@ object ExerciseImageLoader {
         "Mobility" to "Worlds_Greatest_Stretch/0.jpg"
     )
 
-    fun getImageUrl(exerciseId: String): String {
+    fun getFolder(exerciseId: String): String {
         val relPath = EXERCISE_IMAGE_PATHS[exerciseId]
             ?: runCatching {
                 val e = Catalog.get(exerciseId)
                 PATTERN_FALLBACKS[e.pattern]
             }.getOrNull()
             ?: "Pushups/0.jpg"
-        return BASE_URL + relPath
+        return relPath.substringBeforeLast("/")
     }
 
-    fun getCached(exerciseId: String): ImageBitmap? {
-        return memoryCache[exerciseId]
+    fun getImageUrl(exerciseId: String): String = getFrameUrl(exerciseId, 0)
+
+    fun getFrameUrl(exerciseId: String, frame: Int): String {
+        val folder = getFolder(exerciseId)
+        val validFrame = if (frame in 0..1) frame else 0
+        return "$BASE_URL$folder/$validFrame.jpg"
     }
 
-    suspend fun loadExerciseImage(exerciseId: String): ImageBitmap? {
-        memoryCache[exerciseId]?.let { return it }
-        val url = getImageUrl(exerciseId)
-        val loaded = PlatformImageLoader.loadExerciseImage(exerciseId, url)
+    fun getCached(exerciseId: String): ImageBitmap? = getCachedFrame(exerciseId, 0)
+
+    fun getCachedFrame(exerciseId: String, frame: Int): ImageBitmap? {
+        val key = "${exerciseId}_$frame"
+        return memoryCache[key] ?: if (frame == 0) memoryCache[exerciseId] else null
+    }
+
+    suspend fun loadExerciseImage(exerciseId: String): ImageBitmap? = loadExerciseFrame(exerciseId, 0)
+
+    suspend fun loadExerciseFrame(exerciseId: String, frame: Int): ImageBitmap? {
+        val key = "${exerciseId}_$frame"
+        memoryCache[key]?.let { return it }
+        val url = getFrameUrl(exerciseId, frame)
+        val loaded = PlatformImageLoader.loadExerciseImage(key, url)
         if (loaded != null) {
             mutex.withLock {
-                memoryCache[exerciseId] = loaded
+                memoryCache[key] = loaded
+                if (frame == 0) memoryCache[exerciseId] = loaded
             }
         }
         return loaded
     }
 }
+

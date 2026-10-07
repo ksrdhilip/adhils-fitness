@@ -52,18 +52,25 @@ private fun AppContent(vm: FitnessViewModel, store: ProfileStore, state: AppStat
     var leave by remember { mutableStateOf(false) }
     var discard by remember { mutableStateOf(false) }
     val pageScroll = remember(route, if (route == "active") state.active?.currentExercise else null) { ScrollState(0) }
-    val roots = listOf("today", "workouts", "progress", "coach", "settings")
-    val labels = listOf("Workout", "Log", "Recovery", "AI Coach", "Gym")
-    val icons = listOf(Icons.Default.FitnessCenter, Icons.Default.History, Icons.Default.BarChart, Icons.Default.ChatBubbleOutline, Icons.Default.Settings)
+    val roots = listOf("today", "progress", "workouts", "coach", "settings")
+    val labels = listOf("Workout", "Body", "Log", "AI Coach", "Gym")
+    val icons = listOf(Icons.Default.FitnessCenter, Icons.Default.Accessibility, Icons.Default.History, Icons.Default.Videocam, Icons.Default.Settings)
 
     fun showExercise(id: String) {
         previous = route
         route = "exercise:$id"
     }
 
+    fun showHowTo(id: String) {
+        previous = route
+        route = "howto:$id"
+    }
+
     fun back() {
         route = when {
-            route == "camera" -> "active"
+            route.startsWith("howto:") -> previous
+            route == "camera" -> if (state.active != null) "active" else previous
+            route.startsWith("camera:") -> previous
             route.startsWith("exercise:") -> previous
             else -> "today"
         }
@@ -194,23 +201,44 @@ private fun AppContent(vm: FitnessViewModel, store: ProfileStore, state: AppStat
                                     route = "camera:$exId"
                                 }
                             )
-                            route == "active" -> state.active?.let { s ->
-                                WorkoutScreen(state, s, vm, { leave = true }, ::showExercise, { route = "camera" }, {
-                                    vm.finish()
-                                    val estCalories = (s.results.size * 28).coerceIn(80, 800)
-                                    PlatformHealth.syncWorkout(s.id, estCalories)
-                                    route = "summary:${s.id}"
-                                })
-                            } ?: EmptyState("Getting your workout ready", "Your sets are saved as you train.")
+                            route == "active" -> {
+                                val s = state.active ?: run {
+                                    vm.start(CheckIn(minutes = state.profile.minutes))
+                                    state.active
+                                }
+                                if (s != null) {
+                                    WorkoutScreen(state, s, vm, { leave = true }, ::showExercise, { route = "camera" }, {
+                                        vm.finish()
+                                        val estCalories = (s.results.size * 28).coerceIn(80, 800)
+                                        PlatformHealth.syncWorkout(s.id, estCalories)
+                                        route = "summary:${s.id}"
+                                    })
+                                } else {
+                                    EmptyState("Getting your workout ready", "Your sets are saved as you train.")
+                                }
+                            }
                             route.startsWith("exercise:") -> ExerciseScreen(
                                 id = route.substringAfter(":"),
                                 state = state,
                                 vm = vm,
                                 onBack = ::back,
+                                onOpenHowTo = ::showHowTo,
                                 onOpenCameraCoach = {
+                                    previous = route
                                     route = "camera:" + route.substringAfter(":")
                                 }
                             )
+                            route.startsWith("howto:") -> {
+                                val raw = route.substringAfter(":")
+                                val exId = raw.substringBefore(":")
+                                val tabIndex = raw.substringAfter(":", "").toIntOrNull() ?: 0
+                                HowToScreen(
+                                    exerciseId = exId,
+                                    onBack = ::back,
+                                    youtubeUrl = state.videos[exId],
+                                    initialTab = tabIndex
+                                )
+                            }
                             route.startsWith("summary:") -> state.sessions.find { it.id == route.substringAfter(":") }?.let { SummaryScreen(it, state, vm, { route = "today" }, { route = "coach" }) }
                             route == "progress" -> ProgressScreen(state, vm)
                             route == "coach" -> CoachScreen(state, vm, { route = "active" })

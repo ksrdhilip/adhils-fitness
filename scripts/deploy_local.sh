@@ -10,11 +10,12 @@ echo "=== 1. Building Debug APK ==="
 echo "=== 2. Copying APK to local dist ==="
 mkdir -p "$ROOT_DIR/dist"
 cp "$ROOT_DIR/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk" "$ROOT_DIR/dist/ADhils-Fitness-arm64.apk"
+cp "$ROOT_DIR/app/build/outputs/apk/debug/app-x86_64-debug.apk" "$ROOT_DIR/dist/ADhils-Fitness-x86_64.apk"
 cp "$ROOT_DIR/dist/ADhils-Fitness-arm64.apk" "$ROOT_DIR/dist/app.apk"
 
 ADB="${ANDROID_HOME:-$HOME/Library/Android/sdk}/platform-tools/adb"
 if [[ -x "$ADB" ]]; then
-    DEVICES=$("$ADB" devices | grep -v "List of devices" | grep "device" | awk '{print $1}')
+    DEVICES=$("$ADB" devices 2>/dev/null | grep "device$" | awk '{print $1}' || true)
     if [[ -n "$DEVICES" ]]; then
         for DEV in $DEVICES; do
             echo "=== 3. Deploying to connected device: $DEV ==="

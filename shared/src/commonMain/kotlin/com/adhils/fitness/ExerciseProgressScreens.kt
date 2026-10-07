@@ -9,6 +9,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.OndemandVideo
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -179,23 +180,221 @@ fun ExerciseScreen(
     state: AppState,
     vm: FitnessViewModel,
     onBack: () -> Unit,
+    onOpenHowTo: ((String) -> Unit)? = null,
     onOpenCameraCoach: (() -> Unit)? = null
 ) {
     val e = Catalog.get(id)
-    ScreenHeader(e.name, onBack)
-    ExercisePostureMediaCard(e, state, vm, onOpenCameraCoach = onOpenCameraCoach)
-    SmallLabel("${e.equipment} · ${e.muscles}")
-    SectionTitle("How to perform")
-    e.instructions.forEachIndexed { i, text -> Text("${i + 1}. $text") }
-    SectionTitle("Breathing", e.breathing)
-    PanelCard {
-        SectionTitle("AI Camera & Posture placement", "${e.view} view (${e.effectiveCamera} biomechanics). Keep your shoulders, hands, hips, and feet in frame. Use a stable stand.")
-        SmallLabel("Tracks live joint angles and gives rep-by-rep posture corrections for ${e.name}.")
+    var showHowTo by remember { mutableStateOf(false) }
+    var showTrend by remember { mutableStateOf(false) }
+    var showReplace by remember { mutableStateOf(false) }
+
+    if (showHowTo) {
+        HowToScreen(
+            exerciseId = e.id,
+            onBack = { showHowTo = false },
+            youtubeUrl = state.videos[e.id]
+        )
+        return
     }
-    val alternatives = Catalog.alternatives(id, state.profile)
-    if (alternatives.isNotEmpty()) {
-        SectionTitle("Alternatives for this profile")
-        alternatives.forEach { Text("• ${it.name}") }
+
+    val activeSession = state.active
+    val plannedItem = remember(activeSession, e.id) {
+        activeSession?.plan?.find { it.exerciseId == e.id }
+            ?: PlannedExercise(exerciseId = e.id, sets = 3, minReps = 8, maxReps = 12, weightKg = 0.0)
+    }
+    var setCount by remember(plannedItem.sets) { mutableIntStateOf(plannedItem.sets) }
+
+    val pastSets = remember(state.sessions, e.id) {
+        state.sessions.filter { it.finishedAt != null }.flatMap { it.results }.filter { it.exerciseId == e.id && !it.warmup }
+    }
+    val currentResults = remember(activeSession?.results, e.id) {
+        activeSession?.results?.filter { it.exerciseId == e.id } ?: emptyList()
+    }
+    val best1RmKg = remember(state.sessions, e.id) { Recovery.best1RMKg(state, e.id) }
+
+    ScreenHeader(e.name, onBack)
+
+    // Fitbod Realistic Human Motion Demonstration Player
+    RealisticExerciseMotionPlayer(
+        exerciseId = e.id,
+        modifier = Modifier.fillMaxWidth(),
+        showThumbnails = true,
+        showSpeedBadge = true,
+        speed = 1.0f
+    )
+
+    // Primary Action Buttons: [ ▶ How-To ] and [ 🎥 AI Coach ] (Matching Screenshot 3)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Button(
+            onClick = {
+                if (onOpenHowTo != null) onOpenHowTo(e.id) else showHowTo = true
+            },
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = androidx.compose.ui.graphics.Color(0xFF2C2D3A),
+                contentColor = androidx.compose.ui.graphics.Color.White
+            )
+        ) {
+            Icon(Icons.Default.PlayArrow, contentDescription = "How To", modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("How-To", fontWeight = FontWeight.Bold)
+        }
+
+        if (onOpenCameraCoach != null) {
+            Button(
+                onClick = onOpenCameraCoach,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = androidx.compose.ui.graphics.Color(0xFFE83F5B),
+                    contentColor = androidx.compose.ui.graphics.Color.White
+                )
+            ) {
+                Icon(Icons.Default.Videocam, contentDescription = "AI Coach", modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("AI Coach", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+
+    // Quick Utility Chips: Rest Timer | History | Replace (Matching Screenshot 3)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        FilterChip(
+            selected = false,
+            onClick = {
+                if (activeSession != null) vm.adjustTimers(e.id, restDelta = 15)
+            },
+            label = { Text("⏱ Rest ${plannedItem.restSeconds}s") },
+            modifier = Modifier.heightIn(min = 38.dp)
+        )
+        FilterChip(
+            selected = false,
+            onClick = { showTrend = true },
+            label = { Text("📊 History") },
+            modifier = Modifier.heightIn(min = 38.dp)
+        )
+        FilterChip(
+            selected = false,
+            onClick = { showReplace = true },
+            label = { Text("🔄 Replace") },
+            modifier = Modifier.heightIn(min = 38.dp)
+        )
+    }
+
+    // Phase guidance & targets
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = androidx.compose.ui.graphics.Color(0xFF161822),
+        border = androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.ui.graphics.Color(0xFF262836)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text("🎯", fontSize = 20.sp)
+            Column {
+                Text(
+                    "Target: ${if (e.timed) "${plannedItem.seconds} seconds" else "${plannedItem.minReps}–${plannedItem.maxReps} reps"} · ${e.equipment}",
+                    fontWeight = FontWeight.Bold,
+                    color = androidx.compose.ui.graphics.Color.White,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                val ormNote = if (!e.timed && best1RmKg > 0.0) " · Est. 1RM ${weightLabel(best1RmKg, state.profile)}" else ""
+                SmallLabel("${e.muscles}$ormNote")
+            }
+        }
+    }
+
+    // Stacked Set Logging Grid
+    PanelCard {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SmallLabel("SET")
+            Spacer(Modifier.width(24.dp))
+            Box(Modifier.weight(1.1f)) { SmallLabel("PREVIOUS") }
+            if (!e.timed) {
+                Box(Modifier.weight(1f)) { SmallLabel(state.profile.unit.uppercase() + if (e.perHand) "/HAND" else "") }
+            }
+            Box(Modifier.weight(1f)) { SmallLabel(if (e.timed) "SECONDS" else "REPS") }
+            Spacer(Modifier.width(8.dp))
+            SmallLabel("LOG")
+        }
+
+        (0 until setCount).forEach { setIdx ->
+            val logged = currentResults.find { it.setIndex == setIdx }
+            val prevSet = pastSets.getOrNull(pastSets.size - setCount + setIdx) ?: pastSets.lastOrNull()
+            SetLoggingRow(
+                setIndex = setIdx,
+                exercise = e,
+                plan = plannedItem,
+                profile = state.profile,
+                logged = logged,
+                previous = prevSet,
+                onSave = { res ->
+                    if (state.active == null) {
+                        vm.start(CheckIn(minutes = state.profile.minutes))
+                    }
+                    vm.saveSet(res)
+                }
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedButton(
+                onClick = { setCount = (setCount + 1).coerceAtMost(8) },
+                enabled = setCount < 8,
+                modifier = Modifier.heightIn(min = 40.dp)
+            ) {
+                Text("+ Add Set")
+            }
+            if (setCount > 1) {
+                TextButton(
+                    onClick = { setCount = (setCount - 1).coerceAtLeast(1) },
+                    modifier = Modifier.heightIn(min = 40.dp)
+                ) {
+                    Text("- Remove Set")
+                }
+            }
+        }
+    }
+
+    if (showTrend) {
+        ExerciseTrendModal(
+            exerciseId = e.id,
+            state = state,
+            vm = vm,
+            onDismiss = { showTrend = false }
+        )
+    }
+
+    if (showReplace) {
+        ReplacementDialog(
+            e = e,
+            state = state,
+            onReplace = { newId, rememberPref ->
+                if (activeSession != null) {
+                    vm.replace(e.id, newId, rememberPref)
+                }
+                showReplace = false
+                onBack()
+            },
+            onDismiss = { showReplace = false }
+        )
     }
 }
 
