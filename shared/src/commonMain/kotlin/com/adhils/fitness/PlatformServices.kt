@@ -31,8 +31,14 @@ expect object PlatformNotification {
     fun openNotificationSettings()
 }
 
+data class ExerciseAnimationFrame(
+    val bitmap: androidx.compose.ui.graphics.ImageBitmap,
+    val durationMs: Long = 100L
+)
+
 expect object PlatformImageLoader {
     suspend fun loadExerciseImage(exerciseId: String, url: String): androidx.compose.ui.graphics.ImageBitmap?
+    suspend fun loadExerciseAnimation(exerciseId: String, url: String): List<ExerciseAnimationFrame>?
 }
 
 @Composable

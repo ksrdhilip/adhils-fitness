@@ -136,6 +136,48 @@ actual object PlatformImageLoader {
         } catch (_: Exception) {}
         null
     }
+
+    actual suspend fun loadExerciseAnimation(exerciseId: String, url: String): List<ExerciseAnimationFrame>? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val context = PlatformStorage.appContext
+        val baseDir = context?.cacheDir ?: PlatformStorage.storageDir ?: context?.filesDir
+        val cacheDir = if (baseDir != null) File(baseDir, "exercise_gifs").apply { mkdirs() } else null
+        val diskFile = if (cacheDir != null) File(cacheDir, "$exerciseId.gif") else null
+
+        val bytes = if (diskFile != null && diskFile.exists() && diskFile.length() > 0) {
+            try { diskFile.readBytes() } catch (_: Exception) { null }
+        } else {
+            try {
+                val downloaded = java.net.URL(url).openStream().use { it.readBytes() }
+                if (diskFile != null && downloaded.isNotEmpty()) {
+                    try { diskFile.writeBytes(downloaded) } catch (_: Exception) {}
+                }
+                downloaded
+            } catch (_: Exception) { null }
+        } ?: return@withContext null
+
+        try {
+            @Suppress("DEPRECATION")
+            val movie = android.graphics.Movie.decodeByteArray(bytes, 0, bytes.size)
+            if (movie != null && movie.duration() > 0) {
+                val duration = movie.duration()
+                val stepMs = 100
+                val frameCount = (duration / stepMs).coerceIn(4, 30)
+                val width = movie.width().coerceAtLeast(1)
+                val height = movie.height().coerceAtLeast(1)
+                val result = mutableListOf<ExerciseAnimationFrame>()
+                for (i in 0 until frameCount) {
+                    val t = i * stepMs
+                    movie.setTime(t)
+                    val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+                    val canvas = android.graphics.Canvas(bitmap)
+                    movie.draw(canvas, 0f, 0f)
+                    result.add(ExerciseAnimationFrame(bitmap.asImageBitmap(), stepMs.toLong()))
+                }
+                if (result.isNotEmpty()) return@withContext result
+            }
+        } catch (_: Exception) {}
+        null
+    }
 }
 
 object PlatformCameraBridge {

@@ -5,6 +5,7 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.usePinned
 import platform.AudioToolbox.AudioServicesPlaySystemSound
 import platform.Foundation.*
@@ -18,6 +19,7 @@ import platform.CoreGraphics.CGRect
 import platform.QuartzCore.CAShapeLayer
 import platform.QuartzCore.kCALineCapRound
 import platform.QuartzCore.kCALineJoinRound
+import platform.ImageIO.*
 import platform.UIKit.UIBezierPath
 import kotlinx.cinterop.CValue
 import platform.UIKit.UIApplication
@@ -228,6 +230,68 @@ actual object PlatformImageLoader {
             return@withContext Image.makeFromEncoded(bytes).toComposeImageBitmap()
         } catch (_: Throwable) {}
         null
+    }
+
+    @OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
+    actual suspend fun loadExerciseAnimation(exerciseId: String, url: String): List<ExerciseAnimationFrame>? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+        val fileManager = NSFileManager.defaultManager
+        val urls = fileManager.URLsForDirectory(NSCachesDirectory, NSUserDomainMask)
+        val cacheDir = (urls.firstOrNull() as? NSURL)?.URLByAppendingPathComponent("exercise_gifs")
+        if (cacheDir != null && cacheDir.path != null) {
+            fileManager.createDirectoryAtPath(cacheDir.path!!, true, null, null)
+        }
+        val fileUrl = cacheDir?.URLByAppendingPathComponent("$exerciseId.gif")
+
+        var data: NSData? = null
+        if (fileUrl != null && fileManager.fileExistsAtPath(fileUrl.path ?: "")) {
+            data = NSData.create(contentsOfURL = fileUrl)
+        }
+        if (data == null || data.length == 0uL) {
+            try {
+                val nsUrl = NSURL.URLWithString(url) ?: return@withContext null
+                val fetched = NSData.create(contentsOfURL = nsUrl) ?: return@withContext null
+                if (fileUrl != null) {
+                    fetched.writeToURL(fileUrl, true)
+                }
+                data = fetched
+            } catch (t: Throwable) {
+                println("[ANIM] fetch error: ${t.message}")
+                return@withContext null
+            }
+        }
+        val cfData: platform.CoreFoundation.CFDataRef = platform.Foundation.CFBridgingRetain(data)!!.reinterpret()
+        val source = CGImageSourceCreateWithData(cfData, null)
+        platform.CoreFoundation.CFRelease(cfData)
+        if (source == null) return@withContext null
+
+        val count = CGImageSourceGetCount(source).toInt()
+        if (count <= 0) {
+            platform.CoreFoundation.CFRelease(source)
+            return@withContext null
+        }
+
+        val result = mutableListOf<ExerciseAnimationFrame>()
+        try {
+            for (i in 0 until count) {
+                val cgImage = CGImageSourceCreateImageAtIndex(source, i.toULong(), null) ?: continue
+                val uiImage = platform.UIKit.UIImage.imageWithCGImage(cgImage)
+                val pngData = platform.UIKit.UIImageJPEGRepresentation(uiImage, 0.85)
+                    ?: platform.UIKit.UIImagePNGRepresentation(uiImage)
+                if (pngData != null && pngData.length > 0uL) {
+                    val bytes = ByteArray(pngData.length.toInt())
+                    bytes.usePinned { pinned ->
+                        memcpy(pinned.addressOf(0), pngData.bytes, pngData.length)
+                    }
+                    try {
+                        val bitmap = Image.makeFromEncoded(bytes).toComposeImageBitmap()
+                        result.add(ExerciseAnimationFrame(bitmap, 100L))
+                    } catch (_: Throwable) {}
+                }
+            }
+        } finally {
+            platform.CoreFoundation.CFRelease(source)
+        }
+        if (result.isNotEmpty()) result else null
     }
 }
 

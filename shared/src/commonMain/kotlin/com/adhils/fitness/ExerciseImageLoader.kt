@@ -120,6 +120,97 @@ object ExerciseImageLoader {
 
     suspend fun loadExerciseImage(exerciseId: String): ImageBitmap? = loadExerciseFrame(exerciseId, 0)
 
+    private const val CDN_ANIM_BASE = "https://cdn.jsdelivr.net/gh/omercotkd/exercises-gifs@main/assets/"
+    private const val CDN_GYM_BASE = "https://cdn.jsdelivr.net/gh/JahelCuadrado/ExerciseGymGifsDB@v1.1.0/"
+
+    private val EXERCISE_ANIMATION_URLS = mapOf(
+        "goblet-squat" to "${CDN_ANIM_BASE}1760.gif",
+        "bodyweight-squat" to "${CDN_ANIM_BASE}3543.gif",
+        "reverse-lunge" to "${CDN_ANIM_BASE}0078.gif",
+        "dumbbell-split-squat" to "${CDN_ANIM_BASE}0099.gif",
+        "bulgarian-split-squat" to "${CDN_ANIM_BASE}0099.gif",
+        "sumo-squat" to "${CDN_ANIM_BASE}3142.gif",
+        "step-up" to "${CDN_ANIM_BASE}0431.gif",
+        "band-squat" to "${CDN_ANIM_BASE}1004.gif",
+        "wall-sit" to "${CDN_GYM_BASE}glutes/march-sit-wall.gif",
+        "rdl" to "${CDN_ANIM_BASE}0085.gif",
+        "bridge" to "${CDN_ANIM_BASE}1409.gif",
+        "single-leg-rdl" to "${CDN_ANIM_BASE}1756.gif",
+        "hip-thrust" to "${CDN_ANIM_BASE}3236.gif",
+        "single-leg-bridge" to "${CDN_ANIM_BASE}3645.gif",
+        "dumbbell-swing" to "${CDN_ANIM_BASE}0549.gif",
+        "band-rdl" to "${CDN_ANIM_BASE}1009.gif",
+        "good-morning" to "${CDN_ANIM_BASE}0044.gif",
+        "press" to "${CDN_ANIM_BASE}0426.gif",
+        "pushup" to "${CDN_ANIM_BASE}0662.gif",
+        "floor-press" to "${CDN_ANIM_BASE}0065.gif",
+        "wall-pushup" to "${CDN_ANIM_BASE}0492.gif",
+        "bench-press" to "${CDN_ANIM_BASE}0289.gif",
+        "incline-press" to "${CDN_ANIM_BASE}0047.gif",
+        "incline-pushup" to "${CDN_ANIM_BASE}0492.gif",
+        "knee-pushup" to "${CDN_ANIM_BASE}3211.gif",
+        "pike-pushup" to "${CDN_ANIM_BASE}1296.gif",
+        "arnold-press" to "${CDN_ANIM_BASE}2137.gif",
+        "band-press" to "${CDN_ANIM_BASE}0997.gif",
+        "band-chest-press" to "${CDN_GYM_BASE}pectorals/resistance-band-seated-chest-press.gif",
+        "row" to "${CDN_ANIM_BASE}0292.gif",
+        "curl" to "${CDN_ANIM_BASE}0285.gif",
+        "band-row" to "${CDN_GYM_BASE}upper-back/resistance-band-seated-straight-back-row.gif",
+        "band-pull-apart" to "${CDN_GYM_BASE}delts/band-reverse-fly.gif",
+        "bent-over-row" to "${CDN_ANIM_BASE}0027.gif",
+        "chest-supported-row" to "${CDN_ANIM_BASE}0049.gif",
+        "hammer-curl" to "${CDN_ANIM_BASE}1648.gif",
+        "incline-curl" to "${CDN_ANIM_BASE}0072.gif",
+        "reverse-fly" to "${CDN_ANIM_BASE}0075.gif",
+        "band-face-pull" to "${CDN_GYM_BASE}delts/band-reverse-fly.gif",
+        "band-curl" to "${CDN_ANIM_BASE}0968.gif",
+        "superman-pull" to "${CDN_ANIM_BASE}0803.gif",
+        "plank" to "${CDN_ANIM_BASE}0464.gif",
+        "bird-dog" to "${CDN_GYM_BASE}abs/dead-bug.gif",
+        "dead-bug" to "${CDN_ANIM_BASE}0276.gif",
+        "side-plank" to "${CDN_ANIM_BASE}3544.gif",
+        "hollow-hold" to "${CDN_ANIM_BASE}0464.gif",
+        "mountain-climber" to "${CDN_ANIM_BASE}0630.gif",
+        "russian-twist" to "${CDN_ANIM_BASE}0687.gif",
+        "suitcase-hold" to "${CDN_ANIM_BASE}2133.gif",
+        "pallof-press" to "${CDN_ANIM_BASE}0979.gif",
+        "calf-raise" to "${CDN_ANIM_BASE}1372.gif",
+        "lateral-raise" to "${CDN_ANIM_BASE}0334.gif",
+        "weighted-calf-raise" to "${CDN_ANIM_BASE}0088.gif",
+        "front-raise" to "${CDN_ANIM_BASE}0310.gif",
+        "tricep-extension" to "${CDN_ANIM_BASE}1722.gif",
+        "tricep-kickback" to "${CDN_ANIM_BASE}0333.gif",
+        "bench-dip" to "${CDN_ANIM_BASE}0129.gif",
+        "shrug" to "${CDN_ANIM_BASE}0406.gif",
+        "band-pushdown" to "${CDN_ANIM_BASE}0201.gif",
+        "band-lateral-raise" to "${CDN_ANIM_BASE}0977.gif",
+        "arm-circles" to "${CDN_GYM_BASE}delts/band-front-lateral-raise.gif",
+        "hip-openers" to "${CDN_ANIM_BASE}0980.gif",
+        "inchworm" to "${CDN_ANIM_BASE}1471.gif",
+        "cat-cow" to "${CDN_ANIM_BASE}1363.gif",
+        "thoracic-rotation" to "${CDN_ANIM_BASE}0984.gif",
+        "worlds-greatest-stretch" to "${CDN_ANIM_BASE}1410.gif",
+        "childs-pose" to "${CDN_ANIM_BASE}1494.gif"
+    )
+
+    private val animationCache = mutableMapOf<String, List<ExerciseAnimationFrame>>()
+
+    fun getAnimationUrl(exerciseId: String): String? = EXERCISE_ANIMATION_URLS[exerciseId]
+
+    fun getCachedAnimation(exerciseId: String): List<ExerciseAnimationFrame>? = animationCache[exerciseId]
+
+    suspend fun loadExerciseAnimation(exerciseId: String): List<ExerciseAnimationFrame>? {
+        animationCache[exerciseId]?.let { return it }
+        val url = getAnimationUrl(exerciseId) ?: return null
+        val frames = PlatformImageLoader.loadExerciseAnimation(exerciseId, url)
+        if (frames != null && frames.isNotEmpty()) {
+            mutex.withLock {
+                animationCache[exerciseId] = frames
+            }
+        }
+        return frames
+    }
+
     suspend fun loadExerciseFrame(exerciseId: String, frame: Int): ImageBitmap? {
         val folder = getFolder(exerciseId)
         val key = "${folder.replace("/", "_")}_$frame"
