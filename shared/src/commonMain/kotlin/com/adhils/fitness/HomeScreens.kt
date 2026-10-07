@@ -29,9 +29,37 @@ fun TodayScreen(
     onCameraExercise: ((String) -> Unit)? = null
 ) {
     val p = state.profile
-    var quickFocus by remember { mutableStateOf("Freshest Muscles (Auto)") }
-    var quickMuscles by remember { mutableStateOf(emptySet<String>()) }
-    var quickMinutes by remember(p.minutes) { mutableIntStateOf(p.minutes) }
+    val activeSession = state.active
+    val initialSplit = remember(activeSession?.id, activeSession?.title) {
+        activeSession?.let { act ->
+            val t = act.title
+            when {
+                t.contains("Lower Body", ignoreCase = true) -> "Lower Body"
+                t.contains("Upper Body", ignoreCase = true) -> "Upper Body"
+                t.contains("Push", ignoreCase = true) || t.contains("Chest", ignoreCase = true) -> "Push (Chest & Shoulders)"
+                t.contains("Pull", ignoreCase = true) || t.contains("Back", ignoreCase = true) -> "Pull (Back & Biceps)"
+                t.contains("Shoulders", ignoreCase = true) || t.contains("Arms", ignoreCase = true) -> "Shoulders & Arms"
+                t.contains("Core", ignoreCase = true) || t.contains("Mobility", ignoreCase = true) -> "Core & Mobility"
+                t.contains("Full Body", ignoreCase = true) -> "Full Body"
+                else -> "Freshest Muscles (Auto)"
+            }
+        } ?: "Freshest Muscles (Auto)"
+    }
+    val initialMinutes = remember(activeSession?.id, activeSession?.plan?.size, p.minutes) {
+        activeSession?.let { act ->
+            val mainCount = act.plan.count { it.exerciseId !in setOf("march", "cat-cow") }
+            when {
+                mainCount <= 3 -> 20
+                mainCount == 4 -> 30
+                mainCount == 5 -> 45
+                else -> 60
+            }
+        } ?: p.minutes
+    }
+
+    var quickFocus by remember(activeSession?.id) { mutableStateOf(initialSplit) }
+    var quickMuscles by remember(activeSession?.id) { mutableStateOf(emptySet<String>()) }
+    var quickMinutes by remember(activeSession?.id, initialMinutes) { mutableIntStateOf(initialMinutes) }
     var quickSupersets by remember { mutableStateOf(false) }
     var showGymMenu by remember { mutableStateOf(false) }
     var showSplitMenu by remember { mutableStateOf(false) }
@@ -44,7 +72,7 @@ fun TodayScreen(
     val preview = remember(state, quickCheck) { runCatching { Training.generate(state, quickCheck) }.getOrNull() }
     val recovery = remember(state) { Recovery.calculate(state) }
 
-    val plannedExercises = (state.active ?: preview)?.plan ?: emptyList()
+    val plannedExercises = (activeSession ?: preview)?.plan ?: emptyList()
     val musclesCount = remember(plannedExercises) {
         plannedExercises.mapNotNull { Catalog.byId[it.exerciseId] }
             .flatMap { Recovery.extractMuscles(it) }
@@ -52,8 +80,8 @@ fun TodayScreen(
     }
     val freshMuscles = remember(recovery) { Recovery.freshestMuscles(state, 3) }
 
-    val activeDisplayTitle = remember(state.active, preview) {
-        state.active?.let { act ->
+    val activeDisplayTitle = remember(activeSession, preview) {
+        activeSession?.let { act ->
             if (act.title.contains("Fresh Muscle") || act.title.matches(Regex(".* [A-D]( · .*)?"))) {
                 val chosenEx = act.plan.mapNotNull { Catalog.byId[it.exerciseId] }
                 if (chosenEx.isNotEmpty()) {
@@ -111,8 +139,13 @@ fun TodayScreen(
                 DropdownMenu(expanded = showDurationMenu, onDismissRequest = { showDurationMenu = false }) {
                     listOf(20, 30, 40, 45, 60, 75).forEach { m ->
                         DropdownMenuItem(
-                            text = { Text("${m} min") },
-                            onClick = { quickMinutes = m; showDurationMenu = false }
+                            text = { Text((if (quickMinutes == m) "✓ " else "") + "${m} min") },
+                            onClick = {
+                                quickMinutes = m
+                                showDurationMenu = false
+                                val nextCheck = quickCheck.copy(minutes = m)
+                                vm.regenerateWorkout(nextCheck)
+                            }
                         )
                     }
                 }
@@ -129,7 +162,10 @@ fun TodayScreen(
                     listOf("Home Gym", "Commercial Gym", "Bodyweight / Travel").forEach { preset ->
                         DropdownMenuItem(
                             text = { Text((if (p.gymPreset == preset) "✓ " else "") + preset) },
-                            onClick = { vm.switchGymPreset(preset); showGymMenu = false }
+                            onClick = {
+                                showGymMenu = false
+                                vm.switchGymPreset(preset, quickCheck)
+                            }
                         )
                     }
                 }
@@ -137,7 +173,7 @@ fun TodayScreen(
 
             Box {
                 FilterChip(
-                    selected = true,
+                    selected = quickMuscles.isEmpty(),
                     onClick = { showSplitMenu = true },
                     label = { Text(quickFocus.substringBefore(" (") + " ▾", fontWeight = FontWeight.Bold) },
                     modifier = Modifier.heightIn(min = 40.dp)
@@ -154,8 +190,14 @@ fun TodayScreen(
                         "Core & Mobility"
                     ).forEach { sp ->
                         DropdownMenuItem(
-                            text = { Text((if (quickFocus == sp) "✓ " else "") + sp) },
-                            onClick = { quickFocus = sp; showSplitMenu = false }
+                            text = { Text((if (quickFocus == sp && quickMuscles.isEmpty()) "✓ " else "") + sp) },
+                            onClick = {
+                                quickFocus = sp
+                                quickMuscles = emptySet()
+                                showSplitMenu = false
+                                val nextCheck = quickCheck.copy(focus = sp, targetMuscles = emptySet())
+                                vm.regenerateWorkout(nextCheck)
+                            }
                         )
                     }
                 }
@@ -164,7 +206,7 @@ fun TodayScreen(
             FilterChip(
                 selected = quickMuscles.isNotEmpty() || showMusclePicker,
                 onClick = { showMusclePicker = !showMusclePicker },
-                label = { Text(if (quickMuscles.isEmpty()) "Target Muscles ▾" else "Muscles (${quickMuscles.size}) ▾") },
+                label = { Text(if (quickMuscles.isEmpty()) "Target Muscles ▾" else "Muscles (${quickMuscles.size}) ▾", fontWeight = FontWeight.Bold) },
                 modifier = Modifier.heightIn(min = 40.dp)
             )
         }
@@ -180,7 +222,12 @@ fun TodayScreen(
                             muscle = m,
                             recoveryPct = recoveryMap[m] ?: 100,
                             isSelected = sel,
-                            onClick = { quickMuscles = if (sel) quickMuscles - m else quickMuscles + m }
+                            onClick = {
+                                val nextMuscles = if (sel) quickMuscles - m else quickMuscles + m
+                                quickMuscles = nextMuscles
+                                val nextCheck = quickCheck.copy(targetMuscles = nextMuscles)
+                                vm.regenerateWorkout(nextCheck)
+                            }
                         )
                     }
                 }
@@ -272,7 +319,12 @@ fun TodayScreen(
 
                 // Exercise Row Card
                 Surface(
-                    onClick = { onExercise(planned.exerciseId) },
+                    onClick = {
+                        if (state.active == null) {
+                            vm.start(quickCheck)
+                        }
+                        onExercise(planned.exerciseId)
+                    },
                     shape = RoundedCornerShape(14.dp),
                     color = Color(0xFF1E202B),
                     border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2E3142)),
@@ -330,13 +382,13 @@ fun TodayScreen(
     }
 
     // 3. Prominent Bottom Start Workout Button (Fitbod Coral/Pink-Red)
+    val hasLoggedSets = state.active?.results?.isNotEmpty() == true
     Button(
         onClick = {
-            if (state.active != null) onResume()
-            else {
+            if (state.active == null) {
                 vm.start(quickCheck)
-                onResume()
             }
+            onResume()
         },
         enabled = state.active != null || plannedExercises.isNotEmpty(),
         shape = RoundedCornerShape(16.dp),
@@ -349,13 +401,13 @@ fun TodayScreen(
             .height(54.dp)
     ) {
         Icon(
-            imageVector = if (state.active != null) Icons.Default.PlayArrow else Icons.Default.FitnessCenter,
+            imageVector = if (hasLoggedSets) Icons.Default.PlayArrow else Icons.Default.FitnessCenter,
             contentDescription = null,
             modifier = Modifier.size(20.dp)
         )
         Spacer(Modifier.width(8.dp))
         Text(
-            text = if (state.active != null) "Resume Active Workout (In Progress) →"
+            text = if (hasLoggedSets) "Resume Active Workout (In Progress) →"
             else "Start Workout (${plannedExercises.size} Exercises)",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold

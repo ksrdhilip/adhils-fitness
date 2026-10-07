@@ -51,13 +51,23 @@ object Training {
             check.targetMuscles.isNotEmpty() -> {
                 val matching = compatible.filter { ex -> Recovery.extractMuscles(ex).any { it in check.targetMuscles } }
                 val rotated = if (matching.isNotEmpty()) matching.drop((variant * 2) % matching.size) + matching.take((variant * 2) % matching.size) else compatible
-                rotated.distinctBy { it.id }.take(desired)
+                val filled = if (rotated.size < desired) {
+                    val remaining = compatible.filter { it.id !in rotated.map { r -> r.id } }
+                    val rotatedRemaining = if (remaining.isNotEmpty()) remaining.drop((variant * 2) % remaining.size) + remaining.take((variant * 2) % remaining.size) else emptyList()
+                    rotated + rotatedRemaining
+                } else rotated
+                filled.distinctBy { it.id }.take(desired)
             }
             focusKey in setOf("Fresh Muscle Groups", "Fresh Muscles", "Freshest Muscles", "Auto", "Auto-Balanced") -> {
                 val fresh = Recovery.freshestMuscles(state, 4).toSet()
                 val matching = compatible.filter { ex -> Recovery.extractMuscles(ex).firstOrNull() in fresh }
                 val rotated = if (matching.isNotEmpty()) matching.drop((variant * 2) % matching.size) + matching.take((variant * 2) % matching.size) else compatible
-                rotated.distinctBy { it.id }.take(desired)
+                val filled = if (rotated.size < desired) {
+                    val remaining = compatible.filter { it.id !in rotated.map { r -> r.id } }
+                    val rotatedRemaining = if (remaining.isNotEmpty()) remaining.drop((variant * 2) % remaining.size) + remaining.take((variant * 2) % remaining.size) else emptyList()
+                    rotated + rotatedRemaining
+                } else rotated
+                filled.distinctBy { it.id }.take(desired)
             }
             focusKey == "Full Body" || focusKey.isEmpty() -> {
                 val ids = when (variant) {
@@ -66,18 +76,21 @@ object Training {
                     2 -> listOf("sumo-squat", "single-leg-rdl", "arnold-press", "hammer-curl", "side-plank", "calf-raise")
                     else -> listOf("bulgarian-split-squat", "hip-thrust", "bench-press", "chest-supported-row", "bird-dog", "front-raise")
                 }
-                ids.mapNotNull { id ->
+                val mapped = ids.mapNotNull { id ->
                     val e = Catalog.get(id)
                     if (e.id !in p.excluded && (e.equipment == "Bodyweight" || e.equipment in p.equipment)) e
                     else compatible.firstOrNull { it.pattern == e.pattern }
-                }.distinctBy { it.id }.take(desired)
+                }.distinctBy { it.id }
+                val filled = if (mapped.size < desired) mapped + compatible.filter { it.id !in mapped.map { r -> r.id } } else mapped
+                filled.distinctBy { it.id }.take(desired)
             }
             else -> {
                 val pool = when {
-                    focusKey == "Core & Mobility" -> {
+                    focusKey in setOf("Core", "Mobility", "Core & Mobility") -> {
                         Catalog.exercises.filter {
                             it.id !in p.excluded && (it.equipment == "Bodyweight" || it.equipment in p.equipment) &&
-                                it.pattern in setOf("Core", "Mobility", "Carry") && it.id !in setOf("march", "cat-cow")
+                                (it.pattern in setOf("Core", "Mobility", "Carry") || "Core" in Recovery.extractMuscles(it)) &&
+                                it.id !in setOf("march", "cat-cow")
                         }
                     }
                     focusKey in setOf("Back", "Pull", "Back & Biceps") -> {
@@ -90,10 +103,10 @@ object Training {
                         compatible.filter { val m = Recovery.extractMuscles(it); "Chest" in m || "Shoulders" in m || "Triceps" in m || it.pattern == "Push" }
                     }
                     focusKey == "Upper Body" -> {
-                        compatible.filter { it.pattern in listOf("Push", "Pull", "Carry", "Core") }
+                        compatible.filter { it.pattern in listOf("Push", "Pull") || Recovery.extractMuscles(it).any { m -> m in setOf("Chest", "Back", "Shoulders", "Biceps", "Triceps") } }
                     }
                     focusKey == "Lower Body" -> {
-                        compatible.filter { it.pattern in listOf("Squat", "Hinge", "Carry", "Core") }
+                        compatible.filter { it.pattern in listOf("Squat", "Hinge") || Recovery.extractMuscles(it).any { m -> m in setOf("Quads", "Glutes", "Hamstrings", "Calves") } }
                     }
                     else -> {
                         val primaryPatterns = listOf("Squat", "Hinge", "Push", "Pull", "Core")
@@ -101,7 +114,12 @@ object Training {
                     }
                 }
                 val rotated = if (pool.isNotEmpty()) pool.drop((variant * 2) % pool.size) + pool.take((variant * 2) % pool.size) else compatible
-                rotated.distinctBy { it.id }.take(desired)
+                val filled = if (rotated.size < desired) {
+                    val remaining = compatible.filter { it.id !in rotated.map { r -> r.id } }
+                    val rotatedRemaining = if (remaining.isNotEmpty()) remaining.drop((variant * 2) % remaining.size) + remaining.take((variant * 2) % remaining.size) else emptyList()
+                    rotated + rotatedRemaining
+                } else rotated
+                filled.distinctBy { it.id }.take(desired)
             }
         }
         require(chosen.isNotEmpty()) { "No compatible exercises. Update equipment or restrictions." }

@@ -396,7 +396,11 @@ fun ExerciseScreen(
                 previous = prevSet,
                 onSave = { res ->
                     if (state.active == null) {
-                        vm.start(CheckIn(minutes = state.profile.minutes))
+                        val check = CheckIn(minutes = state.profile.minutes, targetMuscles = Recovery.extractMuscles(e).toSet())
+                        vm.start(check)
+                    }
+                    if (state.active?.plan?.none { it.exerciseId == res.exerciseId } == true) {
+                        vm.addExercise(res.exerciseId)
                     }
                     vm.saveSet(res)
                     val restMs = (plannedItem.restSeconds * 1000L).coerceAtLeast(15_000L)

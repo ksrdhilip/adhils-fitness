@@ -57,7 +57,8 @@ open class FitnessViewModel : ViewModel() {
     fun saveProfile(profile: Profile) = edit { it.copy(profile = profile.copy(onboardingComplete = true)) }
 
     fun start(check: CheckIn, routine: SavedRoutine? = null) = edit { state ->
-        require(state.active == null) { "Resume or finish your current workout first." }
+        val active = state.active
+        require(active == null || active.results.isEmpty()) { "Resume or finish your current workout first." }
         lastPrBadges.value = emptyList()
         val session = if (routine == null) Training.generate(state, check) else Session(
             title = routine.name, plan = routine.plan.filter {
@@ -65,7 +66,35 @@ open class FitnessViewModel : ViewModel() {
             }
         )
         require(session.plan.isNotEmpty()) { "No exercises in this routine match the selected profile." }
-        state.copy(sessions = state.sessions + session)
+        val sessionsWithoutUnstarted = if (active != null && active.results.isEmpty()) {
+            state.sessions.filterNot { it.id == active.id }
+        } else state.sessions
+        state.copy(sessions = sessionsWithoutUnstarted + session)
+    }
+
+    fun regenerateWorkout(check: CheckIn) = edit { state ->
+        val active = state.active
+        val updatedProfile = state.profile.copy(minutes = check.minutes)
+        val effectiveState = state.copy(profile = updatedProfile)
+        val freshSession = Training.generate(effectiveState, check)
+        if (active != null) {
+            val loggedExerciseIds = active.results.map { it.exerciseId }.toSet()
+            val preservedExercises = active.plan.filter { it.exerciseId in loggedExerciseIds }
+            val remainingCapacity = (freshSession.plan.size - preservedExercises.size).coerceAtLeast(0)
+            val newExercises = freshSession.plan.filter { it.exerciseId !in loggedExerciseIds }.take(remainingCapacity)
+            val combinedPlan = if (preservedExercises.isEmpty()) freshSession.plan else (preservedExercises + newExercises)
+            val finalPlan = (if (combinedPlan.isNotEmpty()) combinedPlan else freshSession.plan).distinctBy { it.exerciseId }
+            val nextCurrent = active.currentExercise.coerceIn(finalPlan.indices)
+            val updatedSession = active.copy(
+                title = freshSession.title,
+                plan = finalPlan,
+                currentExercise = nextCurrent,
+                revision = active.revision + 1
+            )
+            effectiveState.copy(sessions = effectiveState.sessions.map { if (it.id == active.id) updatedSession else it })
+        } else {
+            effectiveState.copy(sessions = effectiveState.sessions + freshSession)
+        }
     }
 
     private fun session(change: (Session) -> Session) = edit { state ->
@@ -84,13 +113,35 @@ open class FitnessViewModel : ViewModel() {
     fun moveExercise(index: Int, delta: Int) = session { Training.moveExercise(it, index, delta) }
     fun adjustSetCount(exerciseId: String, delta: Int) = session { Training.adjustSetCount(it, exerciseId, delta) }
 
-    fun switchGymPreset(preset: String) = edit { state ->
+    fun switchGymPreset(preset: String, check: CheckIn? = null) = edit { state ->
         val eq = when (preset) {
             "Commercial Gym" -> setOf("Bodyweight", "Dumbbells", "Bands", "Bench")
             "Bodyweight / Travel" -> setOf("Bodyweight")
             else -> setOf("Bodyweight", "Dumbbells", "Bands")
         }
-        state.copy(profile = state.profile.copy(gymPreset = preset, equipment = eq))
+        val checkIn = check ?: CheckIn(minutes = state.profile.minutes)
+        val updatedProfile = state.profile.copy(gymPreset = preset, equipment = eq, minutes = checkIn.minutes)
+        val effectiveState = state.copy(profile = updatedProfile)
+        val active = effectiveState.active
+        if (active != null) {
+            val freshSession = Training.generate(effectiveState, checkIn)
+            val loggedExerciseIds = active.results.map { it.exerciseId }.toSet()
+            val preservedExercises = active.plan.filter { it.exerciseId in loggedExerciseIds }
+            val remainingCapacity = (freshSession.plan.size - preservedExercises.size).coerceAtLeast(0)
+            val newExercises = freshSession.plan.filter { it.exerciseId !in loggedExerciseIds }.take(remainingCapacity)
+            val combinedPlan = if (preservedExercises.isEmpty()) freshSession.plan else (preservedExercises + newExercises)
+            val finalPlan = (if (combinedPlan.isNotEmpty()) combinedPlan else freshSession.plan).distinctBy { it.exerciseId }
+            val nextCurrent = active.currentExercise.coerceIn(finalPlan.indices)
+            val updatedSession = active.copy(
+                title = freshSession.title,
+                plan = finalPlan,
+                currentExercise = nextCurrent,
+                revision = active.revision + 1
+            )
+            effectiveState.copy(sessions = effectiveState.sessions.map { if (it.id == active.id) updatedSession else it })
+        } else {
+            effectiveState
+        }
     }
 
     fun nextExercise(index: Int) = session { it.copy(currentExercise = index.coerceIn(it.plan.indices)) }

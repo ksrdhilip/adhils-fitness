@@ -175,4 +175,63 @@ class DomainTest {
         val coreSession = Training.generate(state, CheckIn(focus = "Core & Mobility"))
         assertEquals("Core & Mobility", coreSession.title)
     }
+
+    @Test fun testDropdownSplitsMusclesAndWorkoutRegeneration() {
+        val state = AppState(profile = Profile(equipment = setOf("Bodyweight", "Dumbbells", "Bands", "Bench")))
+
+        // 1. Duration affects exercise count
+        val p20 = Training.generate(state, CheckIn(minutes = 20)).plan.filter { it.exerciseId !in setOf("march", "cat-cow") }
+        val p30 = Training.generate(state, CheckIn(minutes = 30)).plan.filter { it.exerciseId !in setOf("march", "cat-cow") }
+        val p45 = Training.generate(state, CheckIn(minutes = 45)).plan.filter { it.exerciseId !in setOf("march", "cat-cow") }
+        val p60 = Training.generate(state, CheckIn(minutes = 60)).plan.filter { it.exerciseId !in setOf("march", "cat-cow") }
+        assertEquals(3, p20.size)
+        assertEquals(4, p30.size)
+        assertEquals(5, p45.size)
+        assertEquals(6, p60.size)
+
+        // 2. Split dropdown changes exercises
+        val lowerPlan = Training.generate(state, CheckIn(focus = "Lower Body")).plan.filter { it.exerciseId !in setOf("march", "cat-cow") }
+        assertTrue(lowerPlan.all {
+            val ex = Catalog.get(it.exerciseId)
+            ex.pattern in setOf("Squat", "Hinge", "Accessory", "Carry", "Core") ||
+                Recovery.extractMuscles(ex).any { m -> m in setOf("Quads", "Glutes", "Hamstrings", "Calves") }
+        })
+
+        val pushPlan = Training.generate(state, CheckIn(focus = "Push (Chest & Shoulders)")).plan.filter { it.exerciseId !in setOf("march", "cat-cow") }
+        assertTrue(pushPlan.all {
+            val ex = Catalog.get(it.exerciseId)
+            ex.pattern == "Push" || Recovery.extractMuscles(ex).any { m -> m in setOf("Chest", "Shoulders", "Triceps") }
+        })
+
+        // 3. Target muscles dropdown prioritizes selected muscles
+        val chestGen = Training.generate(state, CheckIn(targetMuscles = setOf("Chest"), minutes = 45))
+        val chestPlan = chestGen.plan.filter { it.exerciseId !in setOf("march", "cat-cow") }
+        assertTrue(chestPlan.any { "Chest" in Recovery.extractMuscles(Catalog.get(it.exerciseId)) })
+        assertTrue(chestGen.title.contains("Chest Focus"))
+
+        // 4. Session preservation during regeneration with logged sets
+        val active = Training.generate(state, CheckIn(focus = "Push (Chest & Shoulders)", minutes = 45))
+        val loggedExercise = active.plan.first { it.exerciseId !in setOf("march", "cat-cow") }.exerciseId
+        val activeWithResult = active.copy(results = listOf(SetResult(exerciseId = loggedExercise, setIndex = 0, reps = 10, weightKg = 15.0)))
+
+        // Regenerate to Lower Body 20 min
+        val newCheck = CheckIn(focus = "Lower Body", minutes = 20)
+        val fresh = Training.generate(state, newCheck)
+        val loggedExerciseIds = activeWithResult.results.map { it.exerciseId }.toSet()
+        val preservedExercises = activeWithResult.plan.filter { it.exerciseId in loggedExerciseIds }
+        val remainingCapacity = (fresh.plan.size - preservedExercises.size).coerceAtLeast(0)
+        val newExercises = fresh.plan.filter { it.exerciseId !in loggedExerciseIds }.take(remainingCapacity)
+        val combinedPlan = (preservedExercises + newExercises).distinctBy { it.exerciseId }
+        val regeneratedSession = activeWithResult.copy(
+            title = fresh.title,
+            plan = combinedPlan,
+            currentExercise = activeWithResult.currentExercise.coerceIn(combinedPlan.indices)
+        )
+        val updatedState = state.copy(sessions = listOf(regeneratedSession)).validated()
+
+        assertTrue(updatedState.active != null)
+        assertTrue(updatedState.active!!.results.isNotEmpty())
+        assertTrue(updatedState.active!!.plan.any { it.exerciseId == loggedExercise })
+        assertTrue(updatedState.active!!.title.startsWith("Lower Body"))
+    }
 }
