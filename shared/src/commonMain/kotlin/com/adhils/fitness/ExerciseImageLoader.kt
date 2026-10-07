@@ -71,11 +71,11 @@ object ExerciseImageLoader {
         "shrug" to "Barbell_Shrug/0.jpg",
         "band-pushdown" to "Cable_Incline_Triceps_Extension/0.jpg",
         "band-lateral-raise" to "Lateral_Raise_-_With_Bands/0.jpg",
-        "march" to "Step-up_with_Knee_Raise/0.jpg",
+        "march" to "Fast_Skipping/0.jpg",
         "arm-circles" to "Arm_Circles/0.jpg",
-        "hip-openers" to "Step-up_with_Knee_Raise/0.jpg",
+        "hip-openers" to "Standing_Hip_Circles/0.jpg",
         "inchworm" to "Inchworm/0.jpg",
-        "cat-cow" to "Worlds_Greatest_Stretch/0.jpg",
+        "cat-cow" to "Cat_Stretch/0.jpg",
         "thoracic-rotation" to "Worlds_Greatest_Stretch/0.jpg",
         "worlds-greatest-stretch" to "Worlds_Greatest_Stretch/0.jpg",
         "childs-pose" to "Childs_Pose/0.jpg"
@@ -113,21 +113,23 @@ object ExerciseImageLoader {
     fun getCached(exerciseId: String): ImageBitmap? = getCachedFrame(exerciseId, 0)
 
     fun getCachedFrame(exerciseId: String, frame: Int): ImageBitmap? {
-        val key = "${exerciseId}_$frame"
-        return memoryCache[key] ?: if (frame == 0) memoryCache[exerciseId] else null
+        val folder = getFolder(exerciseId)
+        val key = "${folder.replace("/", "_")}_$frame"
+        return memoryCache[key] ?: if (frame == 0) memoryCache[folder.replace("/", "_")] else null
     }
 
     suspend fun loadExerciseImage(exerciseId: String): ImageBitmap? = loadExerciseFrame(exerciseId, 0)
 
     suspend fun loadExerciseFrame(exerciseId: String, frame: Int): ImageBitmap? {
-        val key = "${exerciseId}_$frame"
+        val folder = getFolder(exerciseId)
+        val key = "${folder.replace("/", "_")}_$frame"
         memoryCache[key]?.let { return it }
         val url = getFrameUrl(exerciseId, frame)
         val loaded = PlatformImageLoader.loadExerciseImage(key, url)
         if (loaded != null) {
             mutex.withLock {
                 memoryCache[key] = loaded
-                if (frame == 0) memoryCache[exerciseId] = loaded
+                if (frame == 0) memoryCache[folder.replace("/", "_")] = loaded
             }
         }
         return loaded

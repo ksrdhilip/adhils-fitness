@@ -47,7 +47,7 @@ fun FitnessApp(vm: FitnessViewModel = remember { FitnessViewModel() }, initialRo
 @Composable
 private fun AppContent(vm: FitnessViewModel, store: ProfileStore, state: AppState, initialRoute: String? = null) {
     var route by rememberSaveable { mutableStateOf(initialRoute ?: if (state.profile.onboardingComplete) "today" else "welcome") }
-    var previous by rememberSaveable { mutableStateOf("today") }
+    val navStack = remember { mutableStateListOf<String>() }
     var profiles by remember { mutableStateOf(false) }
     var leave by remember { mutableStateOf(false) }
     var discard by remember { mutableStateOf(false) }
@@ -56,28 +56,31 @@ private fun AppContent(vm: FitnessViewModel, store: ProfileStore, state: AppStat
     val labels = listOf("Workout", "Body", "Log", "AI Coach", "Gym")
     val icons = listOf(Icons.Default.FitnessCenter, Icons.Default.Accessibility, Icons.Default.History, Icons.Default.Videocam, Icons.Default.Settings)
 
-    fun showExercise(id: String) {
-        previous = route
-        route = "exercise:$id"
-    }
-
-    fun showHowTo(id: String) {
-        previous = route
-        route = "howto:$id"
-    }
-
-    fun back() {
-        route = when {
-            route.startsWith("howto:") -> previous
-            route == "camera" -> if (state.active != null) "active" else previous
-            route.startsWith("camera:") -> previous
-            route.startsWith("exercise:") -> previous
-            else -> "today"
+    fun navigateTo(dest: String) {
+        if (route != dest) {
+            navStack.add(route)
+            route = dest
         }
     }
 
+    fun back() {
+        if (navStack.isNotEmpty()) {
+            route = navStack.removeAt(navStack.lastIndex)
+        } else {
+            route = if (route == "active") "today" else "today"
+        }
+    }
+
+    fun showExercise(id: String) {
+        navigateTo("exercise:$id")
+    }
+
+    fun showHowTo(id: String) {
+        navigateTo("howto:$id")
+    }
+
     PlatformBackHandler(route !in roots && route != "welcome") {
-        if (route == "active") leave = true else back()
+        back()
     }
 
     // Keep screen awake while workout is started/active or camera is open
@@ -124,12 +127,12 @@ private fun AppContent(vm: FitnessViewModel, store: ProfileStore, state: AppStat
             exercise = currentExercise,
             state = state,
             vm = vm,
-            onBack = { if (state.active != null) route = "active" else back() }
+            onBack = ::back
         ) { reps, seconds, notes ->
             state.active?.let { s ->
                 CameraDraft.value = CameraSetDraft(store.selectedId, s.id, currentExercise.id, reps, seconds, notes)
             }
-            route = if (state.active != null) "active" else "today"
+            back()
         }
         return
     }
@@ -141,7 +144,10 @@ private fun AppContent(vm: FitnessViewModel, store: ProfileStore, state: AppStat
                 roots.forEachIndexed { i, name ->
                     NavigationBarItem(
                         selected = route == name,
-                        onClick = { route = name },
+                        onClick = {
+                            navStack.clear()
+                            route = name
+                        },
                         icon = { Icon(icons[i], labels[i]) },
                         label = { Text(labels[i], maxLines = 1) }
                     )
@@ -153,7 +159,10 @@ private fun AppContent(vm: FitnessViewModel, store: ProfileStore, state: AppStat
                     roots.forEachIndexed { i, name ->
                         NavigationRailItem(
                             selected = route == name,
-                            onClick = { route = name },
+                            onClick = {
+                                navStack.clear()
+                                route = name
+                            },
                             icon = { Icon(icons[i], labels[i]) },
                             label = { Text(labels[i]) }
                         )
@@ -170,35 +179,33 @@ private fun AppContent(vm: FitnessViewModel, store: ProfileStore, state: AppStat
                             }
                         })
                         when {
-                            route == "profile" -> ProfileScreen(state.profile, onSave = { vm.saveProfile(it); route = "today" }, onBack = if (state.profile.onboardingComplete) ({ route = "settings" }) else ({ route = "welcome" }))
+                            route == "profile" -> ProfileScreen(state.profile, onSave = { vm.saveProfile(it); back() }, onBack = if (state.profile.onboardingComplete) ({ back() }) else ({ route = "welcome" }))
                             route == "today" -> TodayScreen(
                                 state,
                                 vm,
-                                { route = "checkin" },
-                                { route = "active" },
+                                { navigateTo("checkin") },
+                                { navigateTo("active") },
                                 ::showExercise,
-                                { route = "workouts" },
+                                { navigateTo("workouts") },
                                 onCameraExercise = { exId ->
-                                    previous = "today"
-                                    route = "camera:$exId"
+                                    navigateTo("camera:$exId")
                                 }
                             )
-                            route == "checkin" -> CheckInScreen(state.profile, { vm.start(it); route = "active" }, { route = "today" }) { check ->
+                            route == "checkin" -> CheckInScreen(state.profile, { vm.start(it); navigateTo("active") }, { back() }) { check ->
                                 val targetNote = if (check.targetMuscles.isNotEmpty()) " Target muscles: ${check.targetMuscles.joinToString(", ")}."
                                 else if (check.focus.startsWith("Fresh") || check.focus.startsWith("Auto")) " Freshest recovered muscles: ${Recovery.freshestMuscles(state, 4).joinToString(", ")}."
                                 else ""
                                 val prompt = "I am feeling ${check.feeling} today (energy ${check.energy}/5, soreness ${check.soreness}/2). My focus today is ${check.focus} and I have ${check.minutes} minutes.$targetNote Please propose today's workout exercise list using the available catalog exercises (with replacePlan: true)."
                                 vm.ask(prompt, false)
-                                route = "coach"
+                                navigateTo("coach")
                             }
                             route == "workouts" -> LibraryScreen(
                                 state,
                                 ::showExercise,
-                                { vm.start(CheckIn(minutes = state.profile.minutes), it); route = "active" },
-                                { route = "summary:$it" },
+                                { vm.start(CheckIn(minutes = state.profile.minutes), it); navigateTo("active") },
+                                { navigateTo("summary:$it") },
                                 onCameraExercise = { exId ->
-                                    previous = "workouts"
-                                    route = "camera:$exId"
+                                    navigateTo("camera:$exId")
                                 }
                             )
                             route == "active" -> {
@@ -207,12 +214,20 @@ private fun AppContent(vm: FitnessViewModel, store: ProfileStore, state: AppStat
                                     state.active
                                 }
                                 if (s != null) {
-                                    WorkoutScreen(state, s, vm, { leave = true }, ::showExercise, { route = "camera" }, {
-                                        vm.finish()
-                                        val estCalories = (s.results.size * 28).coerceIn(80, 800)
-                                        PlatformHealth.syncWorkout(s.id, estCalories)
-                                        route = "summary:${s.id}"
-                                    })
+                                    WorkoutScreen(
+                                        state = state,
+                                        s = s,
+                                        vm = vm,
+                                        onBack = ::back,
+                                        onExercise = ::showExercise,
+                                        onCamera = { navigateTo("camera") },
+                                        onFinish = {
+                                            vm.finish()
+                                            val estCalories = (s.results.size * 28).coerceIn(80, 800)
+                                            PlatformHealth.syncWorkout(s.id, estCalories)
+                                            navigateTo("summary:${s.id}")
+                                        }
+                                    )
                                 } else {
                                     EmptyState("Getting your workout ready", "Your sets are saved as you train.")
                                 }
@@ -224,8 +239,7 @@ private fun AppContent(vm: FitnessViewModel, store: ProfileStore, state: AppStat
                                 onBack = ::back,
                                 onOpenHowTo = ::showHowTo,
                                 onOpenCameraCoach = {
-                                    previous = route
-                                    route = "camera:" + route.substringAfter(":")
+                                    navigateTo("camera:" + route.substringAfter(":"))
                                 }
                             )
                             route.startsWith("howto:") -> {
@@ -239,10 +253,10 @@ private fun AppContent(vm: FitnessViewModel, store: ProfileStore, state: AppStat
                                     initialTab = tabIndex
                                 )
                             }
-                            route.startsWith("summary:") -> state.sessions.find { it.id == route.substringAfter(":") }?.let { SummaryScreen(it, state, vm, { route = "today" }, { route = "coach" }) }
+                            route.startsWith("summary:") -> state.sessions.find { it.id == route.substringAfter(":") }?.let { SummaryScreen(it, state, vm, { navStack.clear(); route = "today" }, { navigateTo("coach") }) }
                             route == "progress" -> ProgressScreen(state, vm)
-                            route == "coach" -> CoachScreen(state, vm, { route = "active" })
-                            route == "settings" -> SettingsScreen(state, vm, { route = "profile" }, { profiles = true })
+                            route == "coach" -> CoachScreen(state, vm, { navigateTo("active") })
+                            route == "settings" -> SettingsScreen(state, vm, { navigateTo("profile") }, { profiles = true })
                         }
                         Spacer(Modifier.height(12.dp))
                     }

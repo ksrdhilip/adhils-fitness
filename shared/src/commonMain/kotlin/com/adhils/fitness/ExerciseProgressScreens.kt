@@ -21,6 +21,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.adhils.fitness.core.*
+import kotlinx.coroutines.delay
 
 fun youtubePostureUrl(e: Exercise, savedUri: String?): String {
     if (!savedUri.isNullOrBlank() && (savedUri.startsWith("https://") || savedUri.startsWith("http://"))) {
@@ -261,17 +262,49 @@ fun ExerciseScreen(
         }
     }
 
+    var now by remember { mutableLongStateOf(nowMillis()) }
+    var localRestUntil by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = nowMillis()
+            delay(250)
+        }
+    }
+    val effectiveRestUntil = if (activeSession != null && activeSession.restUntil > now) {
+        activeSession.restUntil
+    } else {
+        localRestUntil
+    }
+    val isResting = effectiveRestUntil > now
+    val remainingRestSec = if (isResting) ((effectiveRestUntil - now + 999L) / 1000L).toInt() else plannedItem.restSeconds
+
     // Quick Utility Chips: Rest Timer | History | Replace (Matching Screenshot 3)
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         FilterChip(
-            selected = false,
+            selected = isResting,
             onClick = {
-                if (activeSession != null) vm.adjustTimers(e.id, restDelta = 15)
+                if (isResting) {
+                    localRestUntil = 0L
+                    if (activeSession != null) vm.changeRest(-999_000L)
+                } else {
+                    val restMs = (plannedItem.restSeconds * 1000L).coerceAtLeast(15_000L)
+                    localRestUntil = now + restMs
+                    if (activeSession != null) vm.changeRest(restMs)
+                }
             },
-            label = { Text("⏱ Rest ${plannedItem.restSeconds}s") },
+            label = {
+                Text(
+                    text = if (isResting) "⏱ Resting: ${remainingRestSec}s" else "⏱ Rest ${plannedItem.restSeconds}s",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            colors = FilterChipDefaults.filterChipColors(
+                selectedContainerColor = androidx.compose.ui.graphics.Color(0xFF381E24),
+                selectedLabelColor = androidx.compose.ui.graphics.Color(0xFFFF375F)
+            ),
             modifier = Modifier.heightIn(min = 38.dp)
         )
         FilterChip(
@@ -285,6 +318,26 @@ fun ExerciseScreen(
             onClick = { showReplace = true },
             label = { Text("🔄 Replace") },
             modifier = Modifier.heightIn(min = 38.dp)
+        )
+    }
+
+    // Live Inline Rest Countdown Timer
+    if (isResting) {
+        InlineRestTimerCard(
+            restUntil = effectiveRestUntil,
+            now = now,
+            totalSeconds = plannedItem.restSeconds,
+            onAdjust = { deltaMs ->
+                if (activeSession != null && activeSession.restUntil > now) {
+                    vm.changeRest(deltaMs)
+                } else {
+                    localRestUntil = (localRestUntil + deltaMs).coerceAtLeast(now)
+                }
+            },
+            onSkip = {
+                localRestUntil = 0L
+                if (activeSession != null) vm.changeRest(-999_000L)
+            }
         )
     }
 
@@ -346,6 +399,9 @@ fun ExerciseScreen(
                         vm.start(CheckIn(minutes = state.profile.minutes))
                     }
                     vm.saveSet(res)
+                    val restMs = (plannedItem.restSeconds * 1000L).coerceAtLeast(15_000L)
+                    localRestUntil = now + restMs
+                    vm.changeRest(restMs)
                 }
             )
         }

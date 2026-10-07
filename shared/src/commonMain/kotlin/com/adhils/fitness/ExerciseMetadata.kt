@@ -48,6 +48,18 @@ object ExerciseCatalogMetadata {
                 "Drive firmly through the center of your feet and heels to stand back up, squeezing your glutes at the top."
             )
         ),
+        "march" to ExerciseMetadata(
+            aliases = listOf("Marching in Place", "Standing High Knees March", "Cardio Warmup March"),
+            primaryMuscles = listOf("Quads", "Cardio"),
+            secondaryMuscles = listOf("Calves", "Hip Flexors", "Core"),
+            equipmentNeeded = "No equipment needed",
+            instructionParagraphs = listOf(
+                "Stand tall with your feet hip-width apart, arms relaxed at your sides, and brace your core.",
+                "Lift your right knee smoothly toward your chest until your thigh is parallel to the floor, pumping your left arm forward in a natural running rhythm.",
+                "Lower your right foot with control and immediately drive your left knee up while pumping your right arm forward.",
+                "Maintain an upright posture, engage your abdominals, and keep a steady, rhythmic marching pace to elevate heart rate and warm up joints."
+            )
+        ),
         "bodyweight-squat" to ExerciseMetadata(
             aliases = listOf("Air Squat", "Bodyweight Deep Squat", "Free Squat"),
             primaryMuscles = listOf("Quads"),

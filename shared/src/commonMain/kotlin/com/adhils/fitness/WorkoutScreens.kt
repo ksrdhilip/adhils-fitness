@@ -14,7 +14,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -430,7 +434,11 @@ object CameraDraft { var value by mutableStateOf<CameraSetDraft?>(null) }
                 val load=if(e.timed) 0.0 else weight.toDoubleOrNull()
                 val valid=amount!=null && amount in 1..(if(e.timed) 3600 else 100) && load!=null && load.isFinite() && toKg(load,profile.unit) in 0.0..500.0 && (effort.isBlank() || effort.toIntOrNull() in 1..10)
                 val restLabel=if(plan.supersetGroup!=null) "Save set & switch superset" else "Save set & start ${plan.restSeconds}s rest"
+                val keyboardController = LocalSoftwareKeyboardController.current
+                val focusManager = LocalFocusManager.current
                 PrimaryButton(restLabel,valid) {
+                    focusManager.clearFocus()
+                    keyboardController?.hide()
                     exTimerRunning=false
                     exTimerRemaining=plan.seconds
                     vm.saveSet(SetResult(exerciseId=e.id,setIndex=setIndex,reps=if(e.timed) 0 else amount!!,seconds=if(e.timed) amount!! else 0,
@@ -877,13 +885,38 @@ fun InlineRestTimerCard(
                 SmallLabel(prevStr)
             }
 
+            val keyboardController = LocalSoftwareKeyboardController.current
+            val focusManager = LocalFocusManager.current
+
+            val amt=amountText.toIntOrNull()
+            val wVal=if(exercise.timed) 0.0 else weightText.toDoubleOrNull()
+            val valid=amt!=null && amt in 1..(if(exercise.timed) 3600 else 100) && wVal!=null && wVal.isFinite() && toKg(wVal,profile.unit) in 0.0..500.0
+
+            val commitSet = {
+                focusManager.clearFocus()
+                keyboardController?.hide()
+                if(valid) {
+                    onSave(SetResult(
+                        id=logged?.id ?: newId(),
+                        exerciseId=exercise.id,
+                        setIndex=setIndex,
+                        reps=if(exercise.timed) 0 else amt!!,
+                        seconds=if(exercise.timed) amt!! else 0,
+                        weightKg=toKg(wVal!!,profile.unit),
+                        warmup=(setType=="Warm-up"),
+                        setType=setType,
+                        observations=logged?.observations ?: emptyList()
+                    ))
+                }
+            }
+
             // Weight Input
             if(!exercise.timed) {
                 OutlinedTextField(
                     value=weightText,
                     onValueChange={weightText=it.take(8)},
                     singleLine=true,
-                    keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal),
+                    keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal, imeAction=ImeAction.Next),
                     modifier=Modifier.weight(1f).heightIn(min=48.dp)
                 )
             }
@@ -893,30 +926,14 @@ fun InlineRestTimerCard(
                 value=amountText,
                 onValueChange={amountText=it.take(6)},
                 singleLine=true,
-                keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),
+                keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number, imeAction=ImeAction.Done),
+                keyboardActions=KeyboardActions(onDone={ commitSet() }),
                 modifier=Modifier.weight(1f).heightIn(min=48.dp)
             )
 
             // Oversized 48x48dp Set Completion Checkmark
-            val amt=amountText.toIntOrNull()
-            val wVal=if(exercise.timed) 0.0 else weightText.toDoubleOrNull()
-            val valid=amt!=null && amt in 1..(if(exercise.timed) 3600 else 100) && wVal!=null && wVal.isFinite() && toKg(wVal,profile.unit) in 0.0..500.0
             Surface(
-                onClick={
-                    if(valid) {
-                        onSave(SetResult(
-                            id=logged?.id ?: newId(),
-                            exerciseId=exercise.id,
-                            setIndex=setIndex,
-                            reps=if(exercise.timed) 0 else amt!!,
-                            seconds=if(exercise.timed) amt!! else 0,
-                            weightKg=toKg(wVal!!,profile.unit),
-                            warmup=(setType=="Warm-up"),
-                            setType=setType,
-                            observations=logged?.observations ?: emptyList()
-                        ))
-                    }
-                },
+                onClick={ commitSet() },
                 shape=androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
                 color=if(logged!=null) Mint else if(valid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
                 modifier=Modifier.size(48.dp)
