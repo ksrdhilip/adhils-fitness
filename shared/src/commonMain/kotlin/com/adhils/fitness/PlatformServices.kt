@@ -62,3 +62,12 @@ expect fun PlatformWebView(
     onUrlChange: ((String) -> Unit)? = null
 )
 
+@Composable
+expect fun PlatformVideoPlayer(
+    videoUrl: String,
+    modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
+    isPlaying: Boolean = true,
+    speed: Float = 1.0f,
+    contentDescription: String? = null
+)
+

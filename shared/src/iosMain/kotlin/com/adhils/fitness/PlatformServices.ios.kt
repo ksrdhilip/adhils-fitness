@@ -829,3 +829,146 @@ actual fun PlatformWebView(
     )
 }
 
+@OptIn(ExperimentalForeignApi::class)
+private class IOSLoopingVideoView : UIView(frame = platform.CoreGraphics.CGRectZero.readValue()) {
+    private var queuePlayer: AVQueuePlayer? = null
+    private var playerLooper: AVPlayerLooper? = null
+    private val playerLayer = AVPlayerLayer()
+    private var loadedUrl: String? = null
+    private var isPlayingState: Boolean = true
+    private var playbackSpeed: Float = 1.0f
+
+    init {
+        backgroundColor = UIColor.colorWithRed(0.078, green = 0.082, blue = 0.110, alpha = 1.0)
+        clipsToBounds = true
+        playerLayer.videoGravity = AVLayerVideoGravityResizeAspect
+        layer.addSublayer(playerLayer)
+    }
+
+    override fun layoutSubviews() {
+        super.layoutSubviews()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        playerLayer.frame = bounds
+        CATransaction.commit()
+    }
+
+    fun setVideoSource(url: String, isPlaying: Boolean, speed: Float) {
+        isPlayingState = isPlaying
+        playbackSpeed = speed
+
+        if (loadedUrl == url && queuePlayer != null) {
+            updatePlayback()
+            return
+        }
+        loadedUrl = url
+
+        // Clean up previous player
+        queuePlayer?.pause()
+        queuePlayer?.removeAllItems()
+        playerLooper = null
+        queuePlayer = null
+        playerLayer.player = null
+
+        val resolvedUrl = resolveVideoUrl(url)
+        val playerItem = AVPlayerItem(uRL = resolvedUrl)
+        val newPlayer = AVQueuePlayer(playerItem = playerItem)
+        newPlayer.muted = true
+        playerLayer.player = newPlayer
+        playerLooper = AVPlayerLooper.playerLooperWithPlayer(newPlayer, playerItem)
+        queuePlayer = newPlayer
+
+        updatePlayback()
+    }
+
+    private fun updatePlayback() {
+        val player = queuePlayer ?: return
+        if (isPlayingState) {
+            player.play()
+            player.rate = playbackSpeed
+        } else {
+            player.pause()
+        }
+    }
+
+    fun cleanup() {
+        queuePlayer?.pause()
+        queuePlayer?.removeAllItems()
+        playerLooper = null
+        queuePlayer = null
+        playerLayer.player = null
+        loadedUrl = null
+    }
+
+    private fun resolveVideoUrl(rawUrl: String): NSURL {
+        // 1. Direct local file path
+        if (rawUrl.startsWith("/")) {
+            return NSURL.fileURLWithPath(rawUrl)
+        }
+        if (rawUrl.startsWith("file://")) {
+            val path = rawUrl.removePrefix("file://")
+            return NSURL.fileURLWithPath(path)
+        }
+
+        // 2. Check simulator workspace path if running in development
+        val filename = rawUrl.substringAfterLast("/")
+        val workspaceLocal = "/Users/dhiliprajendran/Workspace/adhils-fitness/videos/$filename"
+        if (NSFileManager.defaultManager.fileExistsAtPath(workspaceLocal)) {
+            return NSURL.fileURLWithPath(workspaceLocal)
+        }
+
+        // 3. Check local app cache: Caches/exercise_videos/$filename
+        val fileManager = NSFileManager.defaultManager
+        val cacheUrls = fileManager.URLsForDirectory(NSCachesDirectory, NSUserDomainMask)
+        val cacheDir = (cacheUrls.firstOrNull() as? NSURL)?.path?.let { "$it/exercise_videos" }
+        if (cacheDir != null) {
+            val cachedFilePath = "$cacheDir/$filename"
+            if (fileManager.fileExistsAtPath(cachedFilePath)) {
+                return NSURL.fileURLWithPath(cachedFilePath)
+            }
+
+            // Not yet cached on device: trigger background download to cache for next time
+            val remoteUrl = NSURL.URLWithString(rawUrl)
+            if (remoteUrl != null) {
+                dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT.toLong(), 0u)) {
+                    try {
+                        fileManager.createDirectoryAtPath(cacheDir, withIntermediateDirectories = true, attributes = null, error = null)
+                        val data = NSData.dataWithContentsOfURL(remoteUrl)
+                        if (data != null && data.length > 0u) {
+                            data.writeToFile(cachedFilePath, atomically = true)
+                        }
+                    } catch (_: Throwable) {}
+                }
+                return remoteUrl
+            }
+        }
+
+        return NSURL.URLWithString(rawUrl) ?: NSURL()
+    }
+}
+
+@OptIn(ExperimentalForeignApi::class)
+@Composable
+actual fun PlatformVideoPlayer(
+    videoUrl: String,
+    modifier: Modifier,
+    isPlaying: Boolean,
+    speed: Float,
+    contentDescription: String?
+) {
+    UIKitView(
+        factory = {
+            IOSLoopingVideoView().apply {
+                setVideoSource(videoUrl, isPlaying, speed)
+            }
+        },
+        update = { view ->
+            view.setVideoSource(videoUrl, isPlaying, speed)
+        },
+        onRelease = { view ->
+            view.cleanup()
+        },
+        modifier = modifier
+    )
+}
+

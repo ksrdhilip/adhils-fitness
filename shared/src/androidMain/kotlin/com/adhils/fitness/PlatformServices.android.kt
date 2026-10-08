@@ -6,6 +6,8 @@ import android.media.ToneGenerator
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.asImageBitmap
 import java.io.File
 
@@ -261,6 +263,102 @@ actual fun PlatformWebView(
             }
         },
         onRelease = { it.destroy() },
+        modifier = modifier
+    )
+}
+
+@Composable
+actual fun PlatformVideoPlayer(
+    videoUrl: String,
+    modifier: androidx.compose.ui.Modifier,
+    isPlaying: Boolean,
+    speed: Float,
+    contentDescription: String?
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var activePath by androidx.compose.runtime.remember(videoUrl) {
+        androidx.compose.runtime.mutableStateOf<String?>(null)
+    }
+
+    androidx.compose.runtime.LaunchedEffect(videoUrl) {
+        val fileName = videoUrl.substringAfterLast("/")
+        val cacheDir = java.io.File(context.cacheDir, "exercise_videos")
+        val localFile = java.io.File(cacheDir, fileName)
+        if (localFile.exists() && localFile.length() > 0) {
+            activePath = localFile.absolutePath
+        } else if (videoUrl.startsWith("http://") || videoUrl.startsWith("https://")) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    cacheDir.mkdirs()
+                    val connection = java.net.URL(videoUrl).openConnection()
+                    connection.connectTimeout = 8000
+                    connection.readTimeout = 8000
+                    val tempFile = java.io.File(cacheDir, "$fileName.tmp")
+                    connection.getInputStream().use { input ->
+                        tempFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    if (tempFile.renameTo(localFile)) {
+                        activePath = localFile.absolutePath
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    val uriToPlay = androidx.compose.runtime.remember(videoUrl, activePath) {
+        val pathStr = activePath
+        if (!pathStr.isNullOrBlank()) {
+            android.net.Uri.fromFile(java.io.File(pathStr))
+        } else if (videoUrl.startsWith("/")) {
+            android.net.Uri.fromFile(java.io.File(videoUrl))
+        } else {
+            android.net.Uri.parse(videoUrl)
+        }
+    }
+
+    androidx.compose.ui.viewinterop.AndroidView(
+        factory = { ctx ->
+            android.widget.VideoView(ctx).apply {
+                setBackgroundColor(android.graphics.Color.parseColor("#14151C"))
+                setVideoURI(uriToPlay)
+                setOnPreparedListener { mp ->
+                    mp.isLooping = true
+                    mp.setVolume(0f, 0f)
+                    try {
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                            val params = mp.playbackParams
+                            params.speed = speed
+                            mp.playbackParams = params
+                        }
+                    } catch (_: Exception) {}
+                    if (isPlaying) {
+                        start()
+                    } else {
+                        pause()
+                    }
+                }
+                setOnCompletionListener { mp ->
+                    mp.start()
+                }
+                setOnErrorListener { _, _, _ -> true }
+            }
+        },
+        update = { videoView ->
+            if (isPlaying) {
+                if (!videoView.isPlaying) {
+                    videoView.start()
+                }
+            } else {
+                if (videoView.isPlaying) {
+                    videoView.pause()
+                }
+            }
+        },
+        onRelease = { videoView ->
+            videoView.stopPlayback()
+        },
         modifier = modifier
     )
 }

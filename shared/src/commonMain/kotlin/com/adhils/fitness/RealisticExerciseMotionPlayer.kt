@@ -38,41 +38,24 @@ fun RealisticExerciseMotionPlayer(
     var isPlaying by remember(exerciseId) { mutableStateOf(true) }
     var currentSpeed by remember(exerciseId, speed) { mutableStateOf(speed) }
 
-    // Multi-frame animation state (10-15 fps video smoothness)
-    var animFrames by remember(exerciseId) { mutableStateOf(ExerciseImageLoader.getCachedAnimation(exerciseId)) }
-    var animIndex by remember(exerciseId) { mutableIntStateOf(0) }
+    val videoUrl = remember(exerciseId) { ExerciseImageLoader.getVideoUrl(exerciseId) }
+    val hasVideo = remember(exerciseId) { ExerciseImageLoader.hasVideo(exerciseId) }
 
     // Fallback 2-keyframe images
     var frame0 by remember(exerciseId) { mutableStateOf(ExerciseImageLoader.getCachedFrame(exerciseId, 0)) }
     var frame1 by remember(exerciseId) { mutableStateOf(ExerciseImageLoader.getCachedFrame(exerciseId, 1)) }
     var fallbackKeyframe by remember(exerciseId) { mutableIntStateOf(0) }
+    var inspectingKeyframe by remember(exerciseId) { mutableStateOf<Int?>(null) }
 
-    // Asynchronously load full animated multi-frame sequence and fallback thumbnails
+    // Asynchronously load fallback thumbnails
     LaunchedEffect(exerciseId) {
-        if (animFrames == null) {
-            animFrames = ExerciseImageLoader.loadExerciseAnimation(exerciseId)
-        }
         if (frame0 == null) frame0 = ExerciseImageLoader.loadExerciseFrame(exerciseId, 0)
         if (frame1 == null) frame1 = ExerciseImageLoader.loadExerciseFrame(exerciseId, 1)
     }
 
-    // High-framerate video playback loop (when multi-frame animation is available)
-    val hasAnimation = animFrames != null && animFrames!!.size > 1
-    LaunchedEffect(exerciseId, isPlaying, currentSpeed, animFrames) {
-        val frames = animFrames
-        if (isPlaying && frames != null && frames.size > 1) {
-            while (true) {
-                val frameDuration = frames.getOrNull(animIndex)?.durationMs ?: 100L
-                val delayMs = ((frameDuration / currentSpeed).toLong()).coerceIn(40L, 500L)
-                delay(delayMs)
-                animIndex = (animIndex + 1) % frames.size
-            }
-        }
-    }
-
-    // Smooth fallback loop with crossfade when only 2 frames are present
-    LaunchedEffect(exerciseId, isPlaying, currentSpeed, hasAnimation) {
-        if (!hasAnimation && isPlaying) {
+    // Fallback loop when only keyframes are available (and not video)
+    LaunchedEffect(exerciseId, isPlaying, currentSpeed, hasVideo) {
+        if (!hasVideo && isPlaying) {
             val keyframeDuration = (1200 / currentSpeed).toLong().coerceIn(600, 2500)
             while (true) {
                 delay(keyframeDuration)
@@ -81,16 +64,8 @@ fun RealisticExerciseMotionPlayer(
         }
     }
 
-    // Smooth animated crossfade alpha between keyframes
-    val fallbackAlpha0 by animateFloatAsState(
-        targetValue = if (fallbackKeyframe == 0) 1f else 0f,
-        animationSpec = tween(durationMillis = 650, easing = FastOutSlowInEasing)
-    )
-
-    // Current active bitmap to render
-    val currentAnimBitmap = if (hasAnimation) animFrames?.getOrNull(animIndex)?.bitmap else null
-    val effectiveThumb0 = animFrames?.firstOrNull()?.bitmap ?: frame0
-    val effectiveThumb1 = animFrames?.let { if (it.size > 1) it[it.size / 2].bitmap else null } ?: frame1 ?: frame0
+    val effectiveThumb0 = frame0
+    val effectiveThumb1 = frame1 ?: frame0
 
     Box(
         modifier = modifier
@@ -98,33 +73,58 @@ fun RealisticExerciseMotionPlayer(
             .height(290.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF14151C))
-            .clickable { isPlaying = !isPlaying },
+            .clickable {
+                if (inspectingKeyframe != null) {
+                    inspectingKeyframe = null
+                    isPlaying = true
+                } else {
+                    isPlaying = !isPlaying
+                }
+            },
         contentAlignment = Alignment.Center
     ) {
-        when {
-            // 1. High-speed fluid video demonstration (10-15 fps)
-            currentAnimBitmap != null -> {
+        // 1. Poster / base image (instant visual before video buffers)
+        val posterBitmap = frame0 ?: frame1
+        if (posterBitmap != null) {
+            Image(
+                bitmap = posterBitmap,
+                contentDescription = "Exercise Poster",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // 2. Hardware-accelerated native looping video player (Fitbod quality)
+        if (hasVideo && inspectingKeyframe == null) {
+            PlatformVideoPlayer(
+                videoUrl = videoUrl,
+                modifier = Modifier.fillMaxSize(),
+                isPlaying = isPlaying,
+                speed = currentSpeed,
+                contentDescription = "Realistic Exercise Video Demonstration"
+            )
+        } else if (inspectingKeyframe != null) {
+            // When user taps a keyframe thumbnail, inspect that exact pose
+            val inspectBitmap = if (inspectingKeyframe == 0) frame0 else (frame1 ?: frame0)
+            if (inspectBitmap != null) {
                 Image(
-                    bitmap = currentAnimBitmap,
-                    contentDescription = "Realistic Exercise Video Demonstration",
+                    bitmap = inspectBitmap,
+                    contentDescription = if (inspectingKeyframe == 0) "Start Position" else "Peak Position",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
             }
-            // 2. Clean, crisp keyframe exercise demonstration
-            frame0 != null || frame1 != null -> {
-                val displayFrame = if (fallbackKeyframe == 0) (frame0 ?: frame1) else (frame1 ?: frame0)
-                if (displayFrame != null) {
-                    Image(
-                        bitmap = displayFrame,
-                        contentDescription = if (fallbackKeyframe == 0) "Start Position" else "Peak Position",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-            }
-            // 3. Loading placeholder
-            else -> {
+        } else if (!hasVideo) {
+            // Fallback keyframe animation
+            val displayFrame = if (fallbackKeyframe == 0) (frame0 ?: frame1) else (frame1 ?: frame0)
+            if (displayFrame != null) {
+                Image(
+                    bitmap = displayFrame,
+                    contentDescription = if (fallbackKeyframe == 0) "Start Position" else "Peak Position",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -175,8 +175,8 @@ fun RealisticExerciseMotionPlayer(
 
         // Left angle / position thumbnails (matching Fitbod start and peak contraction positions)
         if (showThumbnails && (effectiveThumb0 != null || effectiveThumb1 != null)) {
-            val isStartSelected = if (hasAnimation) animIndex == 0 && !isPlaying else fallbackKeyframe == 0 && !isPlaying
-            val isFinishSelected = if (hasAnimation) animIndex == (animFrames!!.size / 2) && !isPlaying else fallbackKeyframe == 1 && !isPlaying
+            val isStartSelected = (inspectingKeyframe == 0) || (inspectingKeyframe == null && !isPlaying && fallbackKeyframe == 0)
+            val isFinishSelected = (inspectingKeyframe == 1) || (inspectingKeyframe == null && !isPlaying && fallbackKeyframe == 1)
 
             Column(
                 modifier = Modifier
@@ -190,11 +190,7 @@ fun RealisticExerciseMotionPlayer(
                         .size(46.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .clickable {
-                            if (hasAnimation) {
-                                animIndex = 0
-                            } else {
-                                fallbackKeyframe = 0
-                            }
+                            inspectingKeyframe = 0
                             isPlaying = false
                             onFrameSelected?.invoke(0)
                         },
@@ -219,11 +215,7 @@ fun RealisticExerciseMotionPlayer(
                         .size(46.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .clickable {
-                            if (hasAnimation) {
-                                animIndex = animFrames!!.size / 2
-                            } else {
-                                fallbackKeyframe = 1
-                            }
+                            inspectingKeyframe = 1
                             isPlaying = false
                             onFrameSelected?.invoke(1)
                         },

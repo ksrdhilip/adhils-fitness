@@ -190,8 +190,18 @@ object ExerciseImageLoader {
         "cat-cow" to "${CDN_ANIM_BASE}1363.gif",
         "thoracic-rotation" to "${CDN_ANIM_BASE}0984.gif",
         "worlds-greatest-stretch" to "${CDN_ANIM_BASE}1410.gif",
-        "childs-pose" to "${CDN_ANIM_BASE}1494.gif"
+        "childs-pose" to "${CDN_ANIM_BASE}1494.gif",
+        "march" to "${CDN_ANIM_BASE}0598.gif"
     )
+
+    private const val CDN_VIDEO_BASE = "https://cdn.jsdelivr.net/gh/ksrdhilip/adhils-fitness@main/videos/"
+    private const val RAW_VIDEO_BASE = "https://raw.githubusercontent.com/ksrdhilip/adhils-fitness/main/videos/"
+
+    fun getVideoUrl(exerciseId: String): String {
+        return "$CDN_VIDEO_BASE$exerciseId.mp4"
+    }
+
+    fun hasVideo(exerciseId: String): Boolean = EXERCISE_ANIMATION_URLS.containsKey(exerciseId)
 
     private val animationCache = mutableMapOf<String, List<ExerciseAnimationFrame>>()
 
