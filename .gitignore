@@ -24,3 +24,5 @@ xcuserdata/
 *.apk
 dist/*.apk
 dist/*.ipa
+.cache_exercises/
+.cache_gifs/
